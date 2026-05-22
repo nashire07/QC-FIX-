@@ -69,7 +69,7 @@ const db = {
   addSub:         (catId, name, order) => sb("sub_competencies", { method: "POST", body: JSON.stringify({ category_id: catId, name, sort_order: order }) }),
   deleteSubs:     (catId) => sb(`sub_competencies?category_id=eq.${catId}`, { method: "DELETE", prefer: "return=minimal" }),
   getEvaluations: () => sb("evaluations?select=*&order=eval_date.desc"),
-  addEval:        (d) => sb("evaluations", { method: "POST", body: JSON.stringify({ mitra_id: d.mitraId, officer_id: d.officerId, status: d.status, eval_date: d.date, notes: d.notes || "" }) }),
+  addEval:        (d) => sb("evaluations", { method: "POST", body: JSON.stringify({ mitra_id: d.mitraId, status: d.status, eval_date: d.date, notes: d.notes || "" }) }),
   updateEval:     (id, d) => sb(`evaluations?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ status: d.status, eval_date: d.date, notes: d.notes || "" }) }),
   updateStatus:   (id, status) => sb(`evaluations?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
   getScores:      () => sb("evaluation_scores?select=*"),

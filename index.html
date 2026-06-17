@@ -4,11 +4,11 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>QC Matrix ⭐</title>
-  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     html,body,#root{height:100%}
-    body{background:#e8f4fd;color:#1a2b42;font-family:'Nunito',sans-serif;font-size:14px}
+    body{background:#eaf3fc;color:#2b3e5a;font-family:'Plus Jakarta Sans',sans-serif;font-size:14px}
   </style>
 </head>
 <body>
@@ -23,7 +23,7 @@
 
 <script type="text/babel" data-presets="react">
 const { useState, useMemo, useEffect, useCallback } = React;
-const { RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Tooltip, LineChart, Line, XAxis, YAxis, CartesianGrid, Legend } = Recharts;
+const { RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Tooltip, LineChart, Line, XAxis, YAxis, CartesianGrid, Legend, BarChart, Bar, ComposedChart, Cell, LabelList } = Recharts;
 
 // ══════════════════════════════════════════════════════
 // SUPABASE CONFIG
@@ -75,6 +75,9 @@ const db = {
   getScores:      () => sb("evaluation_scores?select=*"),
   addScores:      (evalId, scores) => sb("evaluation_scores", { method: "POST", body: JSON.stringify(Object.entries(scores).map(([subId, score]) => ({ evaluation_id: evalId, sub_competency_id: subId, score }))) }),
   deleteScores:   (evalId) => sb(`evaluation_scores?evaluation_id=eq.${evalId}`, { method: "DELETE", prefer: "return=minimal" }),
+  getSensory:     () => sb("sensory_results?select=*&order=created_at"),
+  addSensory:     (r) => sb("sensory_results", { method: "POST", body: JSON.stringify({ mitra_id: r.mitraId || null, mitra_name: r.name, topic_scores: r.topicScores, total_score: r.totalScore }) }),
+  deleteSensory:  (id) => sb(`sensory_results?id=eq.${id}`, { method: "DELETE", prefer: "return=minimal" }),
 };
 
 // ══════════════════════════════════════════════════════
@@ -91,11 +94,11 @@ const dlCSV     = (rows,fn) => { const csv=rows.map(r=>r.map(c=>`"${String(c).re
 // CSS
 // ══════════════════════════════════════════════════════
 const CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Poppins:wght@600;700;800&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-  :root{--bg:#e8f4fd;--sur:#fff;--sur2:#d6ecfb;--bdr:#b8d9f0;--acc:#1565c0;--br:#2196f3;--yl:#ffc107;
-    --red:#f44336;--grn:#00c853;--org:#ff9800;--mut:#5a7a99;--txt:#1a2b42;--r:14px;
-    --fh:'Poppins',sans-serif;--fb:'Nunito',sans-serif;--sh:0 2px 12px rgba(21,101,192,.10)}
+  :root{--bg:#eaf3fc;--sur:#fff;--sur2:#dbeafe;--bdr:#c5dcf2;--acc:#4a90d9;--br:#7eb8e8;--yl:#ffd97a;
+    --red:#f4a8a8;--grn:#a8e0c2;--org:#fbc78a;--mut:#6b85a3;--txt:#2b3e5a;--r:14px;
+    --fh:'Plus Jakarta Sans',sans-serif;--fb:'Plus Jakarta Sans',sans-serif;--sh:0 2px 12px rgba(74,144,217,.10)}
   body{background:var(--bg);color:var(--txt);font-family:var(--fb);font-size:14px}
   .app{display:flex;min-height:100vh}
   /* SIDEBAR */
@@ -224,30 +227,93 @@ const CSS = `
 `;
 
 // ══════════════════════════════════════════════════════
-// LOGIN
+// LOGIN — Role Selection
 // ══════════════════════════════════════════════════════
+const JL_PASSWORD = "kitakerenbangetcoyy";
+
 function Login({ onLogin }) {
-  const [email, setEmail] = useState(""); const [pw, setPw] = useState("");
-  const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
-  const go = async () => {
-    if (!email || !pw) return setErr("Enter email and password");
-    setBusy(true); setErr("");
-    try { onLogin(await db.login(email.toLowerCase().trim(), pw)); }
-    catch (e) { setErr(e.message); } finally { setBusy(false); }
+  const [screen, setScreen] = useState("select"); // "select" | "jl-pw" | "mitra-name"
+  const [pw, setPw] = useState("");
+  const [mitrasList, setMitrasList] = useState([]);
+  const [selectedMitraId, setSelectedMitraId] = useState("");
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    if (screen === "mitra-name") {
+      db.getMitras().then(m => {
+        setMitrasList(m);
+        setSelectedMitraId(m.length ? m[0].id : "");
+        setErr("");
+      }).catch(e => setErr("Gagal memuat daftar mitra: " + e.message));
+    }
+  }, [screen]);
+
+  const enterJL = () => {
+    if (pw === JL_PASSWORD) {
+      onLogin({ id: "jl", name: "QC Junior Lead", role: "lead" });
+    } else {
+      setErr("Password salah. Coba lagi!");
+    }
   };
+
+  const enterMitra = () => {
+    if (!selectedMitraId) return setErr("Pilih mitra dulu ya!");
+    const m = mitrasList.find(x => x.id === selectedMitraId);
+    if (!m) return setErr("Mitra tidak ditemukan");
+    onLogin({ id: m.id, name: m.name, role: "mitra" });
+  };
+
+  if (screen === "jl-pw") return (
+    <div className="lg-bg">
+      <div className="lg-c">
+        <button onClick={()=>{setScreen("select");setErr("");setPw("");}} style={{background:"none",border:"none",cursor:"pointer",color:"#5a7a99",fontSize:13,fontWeight:700,marginBottom:18,display:"flex",alignItems:"center",gap:6}}>← Kembali</button>
+        <div className="lg-l">👑 QC <span>Junior Lead</span></div>
+        <div className="lg-s">Masukkan password untuk melanjutkan</div>
+        {err && <div className="al ad" style={{marginBottom:14}}><span>⚠️</span>{err}</div>}
+        <div className="fg"><label className="fl">Password</label>
+          <input className="fi" type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&enterJL()} autoFocus/>
+        </div>
+        <button className="btn btn-p" style={{width:"100%",justifyContent:"center",marginTop:8}} onClick={enterJL}>Masuk →</button>
+      </div>
+    </div>
+  );
+
+  if (screen === "mitra-name") return (
+    <div className="lg-bg">
+      <div className="lg-c">
+        <button onClick={()=>{setScreen("select");setErr("");setSelectedMitraId("");}} style={{background:"none",border:"none",cursor:"pointer",color:"#5a7a99",fontSize:13,fontWeight:700,marginBottom:18,display:"flex",alignItems:"center",gap:6}}>← Kembali</button>
+        <div className="lg-l">🙋 QC <span>Mitra</span></div>
+        <div className="lg-s">Pilih mitra dari daftar</div>
+        {err && <div className="al ad" style={{marginBottom:14}}><span>⚠️</span>{err}</div>}
+        <div className="fg"><label className="fl">Mitra</label>
+          <select className="fse" value={selectedMitraId} onChange={e=>setSelectedMitraId(e.target.value)} autoFocus>
+            <option value="">-- Pilih mitra --</option>
+            {mitrasList.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </div>
+        <button className="btn btn-p" style={{width:"100%",justifyContent:"center",marginTop:8}} onClick={enterMitra}>Mulai Quiz →</button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="lg-bg">
       <div className="lg-c">
         <div className="lg-l">QC <span>Matrix</span> ⭐</div>
-        <div className="lg-s">Central Kitchen · Skill Tracker — Please sign in</div>
-        {err && <div className="al ad" style={{marginBottom:14}}><span>⚠️</span>{err}</div>}
-        <div className="fg"><label className="fl">Email</label><input className="fi" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="your@email.com" onKeyDown={e=>e.key==="Enter"&&go()} /></div>
-        <div className="fg"><label className="fl">Password</label><input className="fi" type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&go()} /></div>
-        <button className="btn btn-p" style={{width:"100%",justifyContent:"center",marginTop:8}} onClick={go} disabled={busy}>{busy?<span className="spin"/>:"Sign In →"}</button>
-        <div style={{marginTop:16,background:"#e3f2fd",borderRadius:10,padding:"12px 14px",fontSize:12,color:"#1565c0",fontWeight:600}}>
-          <div style={{marginBottom:6,fontWeight:800}}>Demo Accounts:</div>
-          <div>👑 Lead QC: lead@qc.com / lead123</div>
-          <div>🔵 Officer: officer1@qc.com / officer123</div>
+        <div className="lg-s">Central Kitchen · Pilih profil untuk melanjutkan</div>
+        <div style={{display:"flex",flexDirection:"column",gap:14,marginTop:8}}>
+          <button onClick={()=>{setErr("");setScreen("jl-pw");}} style={{background:"linear-gradient(135deg,#1e88e5,#1565c0)",border:"none",borderRadius:14,padding:"20px 22px",cursor:"pointer",textAlign:"left",color:"#fff",boxShadow:"0 4px 18px rgba(21,101,192,.3)",transition:"transform .15s"}}
+            onMouseEnter={e=>e.currentTarget.style.transform="translateY(-2px)"} onMouseLeave={e=>e.currentTarget.style.transform=""}>
+            <div style={{fontSize:28,marginBottom:6}}>👑</div>
+            <div style={{fontFamily:"var(--fh)",fontSize:16,fontWeight:800}}>QC Junior Lead</div>
+            <div style={{fontSize:12,opacity:.8,marginTop:3}}>Akses penuh · Kelola soal & lihat hasil quiz</div>
+          </button>
+          <button onClick={()=>{setErr("");setScreen("mitra-name");}} style={{background:"#fff",border:"2px solid var(--bdr)",borderRadius:14,padding:"20px 22px",cursor:"pointer",textAlign:"left",color:"var(--txt)",boxShadow:"var(--sh)",transition:"transform .15s"}}
+            onMouseEnter={e=>e.currentTarget.style.transform="translateY(-2px)"} onMouseLeave={e=>e.currentTarget.style.transform=""}>
+            <div style={{fontSize:28,marginBottom:6}}>🙋</div>
+            <div style={{fontFamily:"var(--fh)",fontSize:16,fontWeight:800}}>QC Mitra</div>
+            <div style={{fontSize:12,color:"var(--mut)",marginTop:3}}>Ikuti Sensory Evaluation Quiz</div>
+          </button>
         </div>
       </div>
     </div>
@@ -258,11 +324,14 @@ function Login({ onLogin }) {
 // SIDEBAR CONTENT
 // ══════════════════════════════════════════════════════
 function Nav({ page, setPage, user, onLogout, onClose }) {
-  const items = [
+  const leadItems = [
     {id:"dashboard",l:"Dashboard",i:"🏠"},{id:"mitras",l:"Mitra List",i:"👥"},
     {id:"evaluations",l:"Evaluations",i:"📋"},{id:"competencies",l:"Competencies",i:"📚"},
     {id:"analytics",l:"Analytics",i:"📊"},{id:"heatmap",l:"Skill Heatmap",i:"🗺️"},
+    {id:"sensory",l:"Sensory Evaluation",i:"👅"},
   ];
+  const mitraItems = [{id:"sensory",l:"Sensory Evaluation",i:"👅"}];
+  const items = user.role === "mitra" ? mitraItems : leadItems;
   const go = id => { setPage(id); onClose?.(); };
   return (
     <>
@@ -272,10 +341,10 @@ function Nav({ page, setPage, user, onLogout, onClose }) {
         {items.map(n=><button key={n.id} className={`ni ${page===n.id?"active":""}`} onClick={()=>go(n.id)}><span>{n.i}</span>{n.l}</button>)}
       </div>
       <div style={{borderTop:"1px solid rgba(255,255,255,.12)",paddingBottom:12}}>
-        <div className="ns">Signed In As</div>
+        <div className="ns">Logged In As</div>
         <button className="up" onClick={onLogout}>
           <div className="av" style={{width:30,height:30,fontSize:13}}>{user.name[0]}</div>
-          <div><div className="un">{user.name}</div><div className="ur">{user.role==="lead"?"Junior Lead QC":"QC Officer"} · Logout</div></div>
+          <div><div className="un">{user.name}</div><div className="ur">{user.role==="lead"?"👑 QC Junior Lead":"🙋 QC Mitra"} · Logout</div></div>
         </button>
       </div>
     </>
@@ -286,7 +355,7 @@ function Nav({ page, setPage, user, onLogout, onClose }) {
 // MAIN APP
 // ══════════════════════════════════════════════════════
 function App() {
-  const [user, setUser] = useState({id:'auto',name:'QC Team',email:'team@qc.com',role:'lead'});
+  const [user, setUser] = useState(null);
   const [page, setPage] = useState("dashboard");
   const [mob, setMob] = useState(false);
   const [modal, setModal] = useState(null);
@@ -311,7 +380,7 @@ function App() {
     finally { setLoading(false); }
   },[]);
 
-  useEffect(()=>{ if(user) load(); },[user]);
+  useEffect(()=>{ if(user && user.role!=="mitra") load(); else if(user?.role==="mitra") setLoading(false); },[user]);
 
   const scMap = useMemo(()=>{
     const m={};
@@ -371,8 +440,8 @@ function App() {
   const expMitras = () => { const r=[["Name","ID","Last Eval","Score","Status","Next Due"]]; mStats.forEach(m=>r.push([m.name,m.employeeId||"—",m.lastEval?fmtDate(m.lastEval.eval_date):"Never",m.avgScore||"—",m.evalStatus,m.nextDue])); dlCSV(r,"qc_mitra.csv"); };
   const expEvals  = () => { const r=[["Mitra","Date","Score","Status","Notes"]]; richEvals.forEach(e=>{const m=mitras.find(x=>x.id===e.mitra_id); r.push([m?.name||"?",fmtDate(e.eval_date),avgScore(e.scores),e.status,e.notes||""]);}); dlCSV(r,"qc_evals.csv"); };
 
-  if (!user) return <><style>{CSS}</style><Login onLogin={setUser}/></>;
-  if (loading) return <><style>{CSS}</style><div className="lscreen"><div className="spin"/><div style={{color:"var(--mut)",fontWeight:600}}>Loading from database…</div></div></>;
+  if (!user) return <><style>{CSS}</style><Login onLogin={u=>{ setUser(u); setPage(u.role==="mitra"?"sensory":"dashboard"); }}/></>;
+  if (loading && user.role!=="mitra") return <><style>{CSS}</style><div className="lscreen"><div className="spin"/><div style={{color:"var(--mut)",fontWeight:600}}>Loading from database…</div></div></>;
 
   const p = {user,mitras,mStats,evals:richEvals,categories,allSubs,counts,setModal,setPage,delMitra,updStatus,delCat,expMitras,expEvals,saveMitra};
 
@@ -381,21 +450,22 @@ function App() {
       <style>{CSS}</style>
       {toast&&<div style={{position:"fixed",top:20,right:20,zIndex:9999,padding:"12px 20px",borderRadius:12,fontWeight:700,fontSize:14,boxShadow:"0 4px 20px rgba(0,0,0,.15)",background:toast.type==="err"?"#ffebee":"#e8f5e9",color:toast.type==="err"?"#c62828":"#2e7d32",border:"1.5px solid",borderColor:toast.type==="err"?"#ef9a9a":"#a5d6a7"}}>{toast.msg}</div>}
       <div className="app">
-        <aside className="sidebar"><Nav page={page} setPage={setPage} user={user} onLogout={()=>setUser(null)}/></aside>
+        <aside className="sidebar"><Nav page={page} setPage={setPage} user={user} onLogout={()=>{setUser(null);setPage("dashboard");}}/></aside>
         <div className={`mob-ov ${mob?"open":""}`} onClick={()=>setMob(false)}/>
-        <div className={`mob-sb ${mob?"open":""}`}><Nav page={page} setPage={setPage} user={user} onLogout={()=>setUser(null)} onClose={()=>setMob(false)}/></div>
+        <div className={`mob-sb ${mob?"open":""}`}><Nav page={page} setPage={setPage} user={user} onLogout={()=>{setUser(null);setPage("dashboard");}} onClose={()=>setMob(false)}/></div>
         <main className="main">
           <div className="topbar">
             <button className="hbg" onClick={()=>setMob(true)}>☰</button>
             <span className="tb-t">QC <span>Matrix</span></span><div className="sp"/>
             <div className="av" style={{width:30,height:30,fontSize:13}}>{user.name[0]}</div>
           </div>
-          {page==="dashboard"    && <Dash {...p}/>}
-          {page==="mitras"       && <Mitras {...p}/>}
-          {page==="evaluations"  && <Evals {...p}/>}
-          {page==="competencies" && <Comps {...p} saveCat={saveCat}/>}
-          {page==="analytics"    && <Analytics {...p}/>}
-          {page==="heatmap"      && <Heatmap {...p}/>}
+          {user.role!=="mitra" && page==="dashboard"    && <Dash {...p}/>}
+          {user.role!=="mitra" && page==="mitras"       && <Mitras {...p}/>}
+          {user.role!=="mitra" && page==="evaluations"  && <Evals {...p}/>}
+          {user.role!=="mitra" && page==="competencies" && <Comps {...p} saveCat={saveCat}/>}
+          {user.role!=="mitra" && page==="analytics"    && <Analytics {...p}/>}
+          {user.role!=="mitra" && page==="heatmap"      && <Heatmap {...p}/>}
+          {page==="sensory" && <SensoryPage user={user}/>}
         </main>
       </div>
       {modal?.type==="mitra-form"   && <MitraForm   data={modal.data} onSave={saveMitra} onClose={()=>setModal(null)}/>}
@@ -543,19 +613,42 @@ function Comps({categories,user,setModal,delCat}){
 
 function Analytics({mitras,evals,categories,allSubs}){
   const [sel,setSel]=useState(mitras[0]?.id||"");
+  const [sensoryResults,setSensoryResults]=useState(loadSR());
+  useEffect(()=>{ fetchSR().then(setSensoryResults); },[]);
   const me=evals.filter(e=>e.mitra_id===sel&&e.status==="Approved").sort((a,b)=>new Date(a.eval_date)-new Date(b.eval_date));
   const latest=me[me.length-1], prev=me[me.length-2];
-  const rd=categories.map(cat=>({subject:cat.name.replace(" Process",""),current:latest?Number((cat.subs.reduce((s,sub)=>s+(latest.scores[sub.id]||0),0)/cat.subs.length).toFixed(1)):0,previous:prev?Number((cat.subs.reduce((s,sub)=>s+(prev.scores[sub.id]||0),0)/cat.subs.length).toFixed(1)):0,fullMark:5}));
-  const ss=allSubs.map(sub=>({name:sub.name,current:latest?(latest.scores[sub.id]||0):0,previous:prev?(prev.scores[sub.id]||0):0})).sort((a,b)=>a.current-b.current);
+  const mitra=mitras.find(m=>m.id===sel);
+  const mitraSens=[...sensoryResults].filter(r=>r.mitraId===sel||r.name===mitra?.name).sort((a,b)=>a.timestamp-b.timestamp);
+  const sLast=mitraSens[mitraSens.length-1], sPrev=mitraSens[mitraSens.length-2];
+  const sensCat=categories.find(c=>/sensory/i.test(c.name));
+  const subSensScore=(subName,res)=>{
+    if(!res) return null;
+    const n=(subName||"").toLowerCase();
+    const topic=SENSORY_TOPICS.find(t=>n.includes(t.id)||n.includes(t.label.toLowerCase().split(" ")[0]));
+    const v=topic?res.topicScores?.[topic.id]:res.totalScore;
+    return v!=null?Number((v*5).toFixed(1)):null;
+  };
+  const rd=categories.map(cat=>{
+    if(sensCat&&cat.id===sensCat.id){
+      return {subject:cat.name.replace(" Process",""),current:sLast?Number((sLast.totalScore*5).toFixed(1)):0,previous:sPrev?Number((sPrev.totalScore*5).toFixed(1)):0,fullMark:5};
+    }
+    return {subject:cat.name.replace(" Process",""),current:latest?Number((cat.subs.reduce((s,sub)=>s+(latest.scores[sub.id]||0),0)/cat.subs.length).toFixed(1)):0,previous:prev?Number((cat.subs.reduce((s,sub)=>s+(prev.scores[sub.id]||0),0)/cat.subs.length).toFixed(1)):0,fullMark:5};
+  });
+  const ss=allSubs.map(sub=>{
+    if(sensCat&&sub.category_id===sensCat.id){
+      return {name:sub.name,current:subSensScore(sub.name,sLast)??0,previous:subSensScore(sub.name,sPrev)??0};
+    }
+    return {name:sub.name,current:latest?(latest.scores[sub.id]||0):0,previous:prev?(prev.scores[sub.id]||0):0};
+  }).sort((a,b)=>a.current-b.current);
   const wk=ss.filter(s=>s.current<4).slice(0,3);
   const td=me.map(e=>({date:fmtDate(e.eval_date),avg:Number(avgScore(e.scores))}));
-  const mitra=mitras.find(m=>m.id===sel);
+  const hasData=latest||sLast;
   return <div className="page">
     <div className="ph"><div className="pt">📊 Analytics & Insights</div><div className="ps">Competency visualization per Mitra</div></div>
     <div className="fg" style={{maxWidth:280,marginBottom:20}}><label className="fl">Select Mitra</label>
       <select className="fse" value={sel} onChange={e=>setSel(e.target.value)}>{mitras.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select>
     </div>
-    {!latest?<div className="es card"><div className="ei">📊</div>No approved evaluations yet.</div>:<>
+    {!hasData?<div className="es card"><div className="ei">📊</div>No approved evaluations yet.</div>:<>
       <div className="g2" style={{gap:16,marginBottom:16}}>
         <div className="card"><div className="ct">🕸️ Radar — {mitra?.name}</div>
           <div className="rw"><ResponsiveContainer width="100%" height="100%"><RadarChart data={rd}>
@@ -809,6 +902,537 @@ function CatForm({data,onSave,onClose}){
   </div></div>;
 }
 
+
+// ══════════════════════════════════════════════════════
+// SENSORY EVALUATION PAGE
+// ══════════════════════════════════════════════════════
+const SENSORY_TOPICS = [
+  { id:"rasa",       label:"5 Rasa Dasar",       emoji:"👅", weight:0.10, color:"#b4a7e8", group:"rasa" },
+  { id:"tri",        label:"Triangle Test",      emoji:"🔺", weight:0.30, color:"#9ed4c8", group:"tri" },
+  { id:"rank-manis", label:"Ranking Test: MANIS",emoji:"🍬", weight:0.30, color:"#f4b5a8", group:"rank" },
+  { id:"rank-asin",  label:"Ranking Test: ASIN", emoji:"🧂", weight:0.30, color:"#fbd29a", group:"rank" },
+];
+
+// localStorage key for questions bank
+const SQ_KEY = "sensory_questions_v1";
+const SR_KEY = "sensory_results_v1";
+
+function loadSQ() {
+  try { return JSON.parse(localStorage.getItem(SQ_KEY)) || {}; } catch { return {}; }
+}
+function saveSQ(data) { localStorage.setItem(SQ_KEY, JSON.stringify(data)); }
+function loadSR() {
+  try { return JSON.parse(localStorage.getItem(SR_KEY)) || []; } catch { return []; }
+}
+function saveSR(arr) { localStorage.setItem(SR_KEY, JSON.stringify(arr)); }
+function mapSR(rows) { return rows.map(r=>({ id:r.id, mitraId:r.mitra_id, name:r.mitra_name, timestamp:new Date(r.created_at).getTime(), topicScores:r.topic_scores||{}, totalScore:Number(r.total_score)||0 })); }
+async function fetchSR() {
+  try { const rows = await db.getSensory(); const arr = mapSR(rows); saveSR(arr); return arr; }
+  catch(e) { console.warn("fetchSR fallback to cache", e); return loadSR(); }
+}
+
+function SensoryPage({ user }) {
+  const isLead = user.role === "lead";
+  const [tab, setTab] = useState(isLead ? "manage" : "quiz");
+  const [questions, setQuestions] = useState(loadSQ());
+  const [results, setResults] = useState(loadSR());
+  useEffect(()=>{ fetchSR().then(setResults); },[]);
+
+  const saveQ = (updated) => { setQuestions(updated); saveSQ(updated); };
+  const saveResult = async (r) => {
+    try { const rows = await db.addSensory(r); const mapped = mapSR(rows); const updated=[...results,...mapped]; setResults(updated); saveSR(updated); }
+    catch(e) { const updated=[...results,r]; setResults(updated); saveSR(updated); alert("Gagal sync ke server: "+e.message); }
+  };
+
+  return (
+    <div className="page">
+      <div className="ph row">
+        <div><div className="pt">👅 Sensory Evaluation</div>
+          <div className="ps">
+            {SENSORY_TOPICS.map(t=><span key={t.id} style={{marginRight:12,fontWeight:700,color:t.color}}>{t.emoji} {t.label} ({Math.round(t.weight*100)}%)</span>)}
+          </div>
+        </div>
+      </div>
+      {isLead ? (
+        <>
+          <div className="tabs">
+            {[["manage","⚙️ Kelola Soal"],["results","📊 Hasil Quiz"]].map(([id,lbl])=>
+              <button key={id} className={`tab ${tab===id?"active":""}`} onClick={()=>setTab(id)}>{lbl}</button>
+            )}
+          </div>
+          {tab==="manage" && <SensoryManage questions={questions} saveQ={saveQ}/>}
+          {tab==="results" && <SensoryResults results={results} setResults={r=>{setResults(r);saveSR(r);}}/>}
+        </>
+      ) : (
+        <SensoryQuiz user={user} questions={questions} onDone={saveResult}/>
+      )}
+    </div>
+  );
+}
+
+// ── LEAD: Manage Questions ──────────────────────────────
+function SensoryManage({ questions, saveQ }) {
+  const [activeTopic, setActiveTopic] = useState(SENSORY_TOPICS[0].id);
+  const [editQ, setEditQ] = useState(null); // {topicId, qIndex|null}
+  const topic = SENSORY_TOPICS.find(t=>t.id===activeTopic);
+  const tQs = questions[activeTopic] || [];
+
+  const addQ  = () => setEditQ({topicId:activeTopic, qIndex:null});
+  const editQi= (i) => setEditQ({topicId:activeTopic, qIndex:i});
+  const delQ  = (i) => {
+    const updated = {...questions};
+    updated[activeTopic] = tQs.filter((_,idx)=>idx!==i);
+    saveQ(updated);
+  };
+  const saveOneQ = (topicId, qIndex, qData) => {
+    const updated = {...questions};
+    const list = [...(updated[topicId]||[])];
+    if(qIndex===null) list.push(qData); else list[qIndex]=qData;
+    updated[topicId]=list;
+    saveQ(updated);
+    setEditQ(null);
+  };
+
+  return (
+    <div>
+      <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap"}}>
+        {SENSORY_TOPICS.map(t=><button key={t.id} onClick={()=>setActiveTopic(t.id)} style={{
+          padding:"9px 18px",borderRadius:99,fontWeight:700,fontSize:14,cursor:"pointer",border:"2px solid",
+          borderColor:activeTopic===t.id?t.color:"var(--bdr)",
+          background:activeTopic===t.id?t.color:"var(--sur)",
+          color:activeTopic===t.id?"#fff":"var(--txt)",transition:"all .15s"
+        }}>{t.emoji} {t.label} <span style={{fontSize:11,opacity:.75}}>({Math.round(t.weight*100)}%)</span></button>)}
+      </div>
+      <div className="row" style={{marginBottom:16}}>
+        <div style={{fontFamily:"var(--fh)",fontSize:16,fontWeight:800,color:topic.color}}>{topic.emoji} {topic.label}</div>
+        <span style={{background:"var(--sur2)",borderRadius:99,padding:"2px 10px",fontSize:11,fontWeight:700,color:"var(--mut)"}}>{tQs.length} soal</span>
+        <div className="sp"/>
+        <button className="btn btn-p" onClick={addQ}>+ Tambah Soal</button>
+      </div>
+      {tQs.length===0 && <div className="es card"><div className="ei">📝</div>Belum ada soal untuk topik ini. Tambahkan soal pertama!</div>}
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        {tQs.map((q,i)=><div key={i} className="card" style={{borderLeft:`4px solid ${topic.color}`}}>
+          <div className="row" style={{marginBottom:10}}>
+            <span style={{background:topic.color,color:"#fff",borderRadius:6,padding:"2px 9px",fontSize:11,fontWeight:700}}>No. {i+1}</span>
+            <span style={{fontWeight:700,fontSize:14,flex:1,marginLeft:4}}>{q.question}</span>
+            <button className="btn btn-g xs" onClick={()=>editQi(i)}>✏️ Edit</button>
+            <button className="btn btn-d xs" onClick={()=>delQ(i)}>🗑️</button>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:6}}>
+            {q.options.map((opt,oi)=><div key={oi} style={{
+              padding:"7px 12px",borderRadius:8,fontSize:13,fontWeight:600,
+              background:oi===q.correct?"#e8f5e9":"#f5faff",
+              border:`1.5px solid ${oi===q.correct?"#a5d6a7":"var(--bdr)"}`,
+              color:oi===q.correct?"#2e7d32":"var(--txt)"
+            }}>{oi===q.correct?"✅ ":""}{opt}</div>)}
+          </div>
+        </div>)}
+      </div>
+      {editQ && <QuestionFormModal topicId={editQ.topicId} qIndex={editQ.qIndex} existing={editQ.qIndex!==null?(questions[editQ.topicId]||[])[editQ.qIndex]:null} onSave={saveOneQ} onClose={()=>setEditQ(null)}/>}
+    </div>
+  );
+}
+
+function QuestionFormModal({ topicId, qIndex, existing, onSave, onClose }) {
+  const [question, setQuestion] = useState(existing?.question||"");
+  const [options, setOptions] = useState(existing?.options||["","","",""]);
+  const [correct, setCorrect] = useState(existing?.correct??0);
+  const topic = SENSORY_TOPICS.find(t=>t.id===topicId);
+  const setOpt = (i,v) => setOptions(p=>{const n=[...p];n[i]=v;return n;});
+  const addOpt = () => setOptions(p=>[...p,""]);
+  const delOpt = (i) => { setOptions(p=>p.filter((_,idx)=>idx!==i)); if(correct>=i&&correct>0) setCorrect(c=>c-1); };
+  const valid = question.trim() && options.filter(o=>o.trim()).length>=2;
+  return (
+    <div className="mb"><div className="mo">
+      <button className="mc" onClick={onClose}>✕</button>
+      <div className="mt2">{qIndex!==null?"Edit Soal":"Tambah Soal Baru"}</div>
+      <div style={{background:topic.color+"18",borderRadius:8,padding:"8px 12px",marginBottom:16,fontSize:12,fontWeight:700,color:topic.color}}>{topic.emoji} {topic.label}</div>
+      <div className="fg"><label className="fl">Pertanyaan *</label>
+        <textarea className="fta" value={question} onChange={e=>setQuestion(e.target.value)} placeholder="Tulis pertanyaannya di sini…"/>
+      </div>
+      <div className="fg"><label className="fl">Pilihan Jawaban</label>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {options.map((opt,i)=><div key={i} className="row">
+            <button onClick={()=>setCorrect(i)} title="Tandai sebagai jawaban benar" style={{
+              width:28,height:28,borderRadius:50,border:"2px solid",flexShrink:0,cursor:"pointer",
+              borderColor:i===correct?"var(--grn)":"var(--bdr)",
+              background:i===correct?"var(--grn)":"var(--sur)",color:"#fff",fontSize:13
+            }}>{i===correct?"✓":""}</button>
+            <input className="fi" value={opt} onChange={e=>setOpt(i,e.target.value)} placeholder={`Opsi ${String.fromCharCode(65+i)}`} style={{flex:1}}/>
+            {options.length>2&&<button className="btn btn-d xs" onClick={()=>delOpt(i)}>✕</button>}
+          </div>)}
+        </div>
+        <button className="btn btn-g sm" style={{marginTop:8}} onClick={addOpt}>+ Tambah Opsi</button>
+        <div style={{fontSize:11,color:"var(--mut)",marginTop:6,fontWeight:600}}>💡 Klik lingkaran hijau untuk menandai jawaban yang benar</div>
+      </div>
+      <div className="row m16">
+        <button className="btn btn-g" onClick={onClose}>Batal</button><div className="sp"/>
+        <button className="btn btn-p" disabled={!valid} onClick={()=>onSave(topicId,qIndex,{question:question.trim(),options,correct})}>Simpan Soal</button>
+      </div>
+    </div></div>
+  );
+}
+
+// ── LEAD: Summary Charts ────────────────────────────────
+function SensorySummary({ results }) {
+  // Compute total% per result (uses stored totalScore if present)
+  const withTotals = results.map(r=>{
+    const totalFrac = r.totalScore!=null ? r.totalScore : SENSORY_TOPICS.reduce((s,t)=>{
+      const ts=r.topicScores?.[t.id]; return s+(ts!=null?ts*t.weight:0);
+    },0);
+    return { ...r, totalPct: Math.round(totalFrac*100) };
+  });
+
+  // PARETO — wrong% per category (avg 1-score across mitras)
+  const paretoRaw = SENSORY_TOPICS.map(t=>{
+    const scores = results.map(r=>r.topicScores?.[t.id]).filter(v=>v!=null);
+    const avg = scores.length? scores.reduce((a,b)=>a+b,0)/scores.length : 0;
+    const wrongPct = Math.round((1-avg)*100);
+    return { name:`${t.emoji} ${t.label}`, wrong:wrongPct, color:t.color };
+  }).sort((a,b)=>b.wrong-a.wrong);
+  const totalWrong = paretoRaw.reduce((s,x)=>s+x.wrong,0) || 1;
+  let cum = 0;
+  const paretoData = paretoRaw.map(x=>{ cum += x.wrong; return { ...x, cumPct: Math.round(cum/totalWrong*100) }; });
+  const weakest = paretoData[0];
+
+  // HISTOGRAM — per mitra total% (latest per mitra)
+  const latestByMitra = {};
+  withTotals.forEach(r=>{
+    const k = r.mitraId || r.name;
+    if(!latestByMitra[k] || r.timestamp > latestByMitra[k].timestamp) latestByMitra[k] = r;
+  });
+  const histData = Object.values(latestByMitra)
+    .sort((a,b)=>b.totalPct-a.totalPct)
+    .map(r=>({ name:r.name, score:r.totalPct }));
+
+  // VENN — counts for A=rasa≥80%, B=tri≥80%, C=ranking≥80%
+  const groupScore = (r,group) => {
+    const ts = SENSORY_TOPICS.filter(t=>t.group===group);
+    const totalW = ts.reduce((s,t)=>s+t.weight,0);
+    let sum=0, has=false;
+    ts.forEach(t=>{ const v=r.topicScores?.[t.id]; if(v!=null){ sum+=v*t.weight; has=true; } });
+    return has ? sum/totalW : null;
+  };
+  const sets = { A:new Set(), B:new Set(), C:new Set() };
+  Object.values(latestByMitra).forEach(r=>{
+    const k = r.mitraId || r.name;
+    const a=groupScore(r,"rasa"), b=groupScore(r,"tri"), c=groupScore(r,"rank");
+    if(a!=null&&a>=0.8) sets.A.add(k);
+    if(b!=null&&b>=0.8) sets.B.add(k);
+    if(c!=null&&c>=0.8) sets.C.add(k);
+  });
+  const inter = (x,y) => [...x].filter(k=>y.has(k));
+  const ABC = inter(sets.A, sets.B).filter(k=>sets.C.has(k));
+  const onlyAB = inter(sets.A, sets.B).filter(k=>!sets.C.has(k));
+  const onlyAC = inter(sets.A, sets.C).filter(k=>!sets.B.has(k));
+  const onlyBC = inter(sets.B, sets.C).filter(k=>!sets.A.has(k));
+  const onlyA = [...sets.A].filter(k=>!sets.B.has(k)&&!sets.C.has(k));
+  const onlyB = [...sets.B].filter(k=>!sets.A.has(k)&&!sets.C.has(k));
+  const onlyC = [...sets.C].filter(k=>!sets.A.has(k)&&!sets.B.has(k));
+
+  const cardStyle = { marginBottom:16 };
+  const titleStyle = { fontFamily:"var(--fh)", fontSize:15, fontWeight:800, marginBottom:4 };
+  const subStyle = { fontSize:12, color:"var(--mut)", marginBottom:12 };
+
+  // Map mitra key → display name (first name only to fit inside venn regions)
+  const nameByKey = {};
+  Object.values(latestByMitra).forEach(r=>{ nameByKey[r.mitraId||r.name] = (r.name||"").split(" ")[0]; });
+  const renderNames = (keys, cx, cy) => {
+    if(!keys.length) return null;
+    const max = 4;
+    const shown = keys.slice(0, max);
+    const extra = keys.length - shown.length;
+    const lh = 11;
+    const startY = cy - ((shown.length-1)*lh)/2;
+    return shown.map((k,i)=>(
+      <text key={k+i} x={cx} y={startY + i*lh} fontSize="9.5" fontWeight="700" textAnchor="middle" fill="#2b3e5a">
+        {i===max-1 && extra>0 ? `${nameByKey[k]||k} +${extra}` : (nameByKey[k]||k)}
+      </text>
+    ));
+  };
+
+  return (
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:20}}>
+      {/* PARETO */}
+      <div className="card" style={{...cardStyle,gridColumn:"1 / -1"}}>
+        <div style={titleStyle}>📉 Pareto — Kelemahan Panelis per Kategori</div>
+        <div style={subStyle}>Kategori dengan jawaban salah terbanyak: <strong style={{color:weakest.color}}>{weakest.name}</strong> ({weakest.wrong}% salah)</div>
+        <div style={{width:"100%",height:280}}>
+          <ResponsiveContainer>
+            <ComposedChart data={paretoData} margin={{top:10,right:30,left:0,bottom:5}}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#eee"/>
+              <XAxis dataKey="name" tick={{fontSize:11}}/>
+              <YAxis yAxisId="left" label={{value:"% Salah",angle:-90,position:"insideLeft",fontSize:11}}/>
+              <YAxis yAxisId="right" orientation="right" domain={[0,100]} label={{value:"Kumulatif %",angle:90,position:"insideRight",fontSize:11}}/>
+              <Tooltip/>
+              <Bar yAxisId="left" dataKey="wrong" name="% Salah">
+                {paretoData.map((e,i)=><Cell key={i} fill={e.color}/>)}
+                <LabelList dataKey="wrong" position="top" style={{fontSize:11,fontWeight:700}}/>
+              </Bar>
+              <Line yAxisId="right" type="monotone" dataKey="cumPct" name="Kumulatif %" stroke="#f4a8a8" strokeWidth={2} dot={{r:4}}/>
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* HISTOGRAM */}
+      <div className="card" style={cardStyle}>
+        <div style={titleStyle}>📊 Histogram — Total Skor per Mitra</div>
+        <div style={subStyle}>Skor total (terbaru) tiap mitra</div>
+        <div style={{width:"100%",height:280}}>
+          <ResponsiveContainer>
+            <BarChart data={histData} margin={{top:10,right:20,left:0,bottom:40}}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#eee"/>
+              <XAxis dataKey="name" tick={{fontSize:11}} interval={0} angle={-25} textAnchor="end"/>
+              <YAxis domain={[0,100]} tick={{fontSize:11}}/>
+              <Tooltip/>
+              <Bar dataKey="score" name="Total %">
+                {histData.map((e,i)=><Cell key={i} fill={e.score>=80?"#a8e0c2":e.score>=60?"#fbd29a":"#f4a8a8"}/>)}
+                <LabelList dataKey="score" position="top" style={{fontSize:11,fontWeight:700}}/>
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* VENN */}
+      <div className="card" style={cardStyle}>
+        <div style={titleStyle}>🔵 Diagram Venn — Mitra ≥ 80%</div>
+        <div style={subStyle}>A = Rasa Dasar · B = Triangle · C = Ranking Test</div>
+        <div style={{width:"100%",height:320,display:"flex",justifyContent:"center",alignItems:"center"}}>
+          <svg viewBox="0 0 360 300" style={{width:"100%",height:"100%"}}>
+            <circle cx="135" cy="120" r="92" fill="#b4a7e8" fillOpacity="0.40" stroke="#9d8de0" strokeWidth="2"/>
+            <circle cx="225" cy="120" r="92" fill="#9ed4c8" fillOpacity="0.40" stroke="#7ec5b5" strokeWidth="2"/>
+            <circle cx="180" cy="200" r="92" fill="#f4b5a8" fillOpacity="0.40" stroke="#ed9b8a" strokeWidth="2"/>
+            {/* labels */}
+            <text x="60"  y="50"  fontSize="13" fontWeight="800" fill="#7d6dcc">A: Rasa</text>
+            <text x="255" y="50"  fontSize="13" fontWeight="800" fill="#5fa897">B: Triangle</text>
+            <text x="150" y="290" fontSize="13" fontWeight="800" fill="#d47967">C: Ranking</text>
+            {/* names per region */}
+            {renderNames(onlyA, 90, 105)}
+            {renderNames(onlyB, 270, 105)}
+            {renderNames(onlyC, 180, 235)}
+            {renderNames(onlyAB, 180, 95)}
+            {renderNames(onlyAC, 125, 185)}
+            {renderNames(onlyBC, 235, 185)}
+            {renderNames(ABC, 180, 155)}
+          </svg>
+        </div>
+        <div style={{fontSize:11,color:"var(--mut)",textAlign:"center",marginTop:4}}>
+          A∩B∩C: <strong>{ABC.length}</strong> · A only: {onlyA.length} · B only: {onlyB.length} · C only: {onlyC.length}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── LEAD: Results ───────────────────────────────────────
+function SensoryResults({ results, setResults }) {
+  const fmt = ts => new Date(ts).toLocaleDateString("id-ID",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  const clear = async () => {
+    if(!confirm("Hapus semua hasil quiz? Ini tidak bisa dibatalkan.")) return;
+    try { for(const r of results){ if(r.id) await db.deleteSensory(r.id); } } catch(e){ alert("Gagal hapus di server: "+e.message); return; }
+    setResults([]);
+  };
+  return (
+    <div>
+      <div className="row" style={{marginBottom:16}}>
+        <div style={{fontFamily:"var(--fh)",fontSize:16,fontWeight:800}}>Hasil Quiz Mitra</div>
+        <div className="sp"/>
+        {results.length>0&&<button className="btn btn-d sm" onClick={clear}>🗑️ Hapus Semua</button>}
+      </div>
+      {results.length===0 && <div className="es card"><div className="ei">📊</div>Belum ada hasil quiz.</div>}
+      {results.length>0 && <SensorySummary results={results}/>}
+      {results.length>0&&<div className="card"><div className="tw"><table>
+        <thead><tr><th>Nama</th><th>Tanggal</th>{SENSORY_TOPICS.map(t=><th key={t.id}>{t.emoji} {t.label}</th>)}<th>Total</th></tr></thead>
+        <tbody>{[...results].reverse().map((r,i)=>{
+          const totalFrac = r.totalScore!=null ? r.totalScore : SENSORY_TOPICS.reduce((sum,t)=>{
+            const tScore=r.topicScores?.[t.id];
+            return sum+(tScore!=null?(tScore*t.weight):0);
+          },0);
+          const totalPct = Math.round(totalFrac*100);
+          return <tr key={i}>
+            <td style={{fontWeight:700}}>{r.name}</td>
+            <td style={{fontSize:12,color:"var(--mut)"}}>{fmt(r.timestamp)}</td>
+            {SENSORY_TOPICS.map(t=>{
+              const ts=r.topicScores?.[t.id];
+              const pct=ts!=null?Math.round(ts*100):null;
+              return <td key={t.id}><span style={{fontWeight:700,color:pct===null?"var(--mut)":pct>=70?"var(--grn)":pct>=50?"var(--org)":"var(--red)"}}>{pct!=null?pct+"%":"—"}</span></td>;
+            })}
+            <td><span style={{fontWeight:800,fontSize:15,color:totalPct>=70?"var(--grn)":totalPct>=50?"var(--org)":"var(--red)"}}>{totalPct}%</span></td>
+          </tr>;
+        })}</tbody>
+      </table></div></div>}
+    </div>
+  );
+}
+
+// ── MITRA: Take Quiz ────────────────────────────────────
+function SensoryQuiz({ user, questions, onDone }) {
+  const [phase, setPhase] = useState("intro"); // intro | quiz | result
+  const [topicIdx, setTopicIdx] = useState(0);
+  const [answers, setAnswers] = useState({}); // {topicId: {qIdx: chosenIdx}}
+  const [result, setResult] = useState(null);
+
+  const allTopics = SENSORY_TOPICS.filter(t=>(questions[t.id]||[]).length>0);
+
+  const startQuiz = () => {
+    if(allTopics.length===0) return;
+    setTopicIdx(0);
+    setAnswers({});
+    setPhase("quiz");
+  };
+
+  const setAnswer = (topicId, qIdx, chosen) => {
+    setAnswers(prev=>({...prev,[topicId]:{...(prev[topicId]||{}),[qIdx]:chosen}}));
+  };
+
+  const finishQuiz = () => {
+    const topicScores = {};
+    let canFinish = true;
+    for(const t of allTopics) {
+      const qs = questions[t.id]||[];
+      const ans = answers[t.id]||{};
+      if(qs.length>0 && Object.keys(ans).length<qs.length){ canFinish=false; break; }
+      const correct = qs.filter((q,i)=>ans[i]===q.correct).length;
+      topicScores[t.id] = qs.length>0 ? correct/qs.length : null;
+    }
+    if(!canFinish){ alert("Jawab semua pertanyaan dulu ya!"); return; }
+    const total = SENSORY_TOPICS.reduce((sum,t)=>{
+      const ts=topicScores[t.id];
+      return sum+(ts!=null?(ts*t.weight):0);
+    },0);
+    const r = { mitraId:user.id, name:user.name, timestamp:Date.now(), topicScores, totalScore:total };
+    setResult(r);
+    onDone(r);
+    setPhase("result");
+  };
+
+  if(phase==="intro") return (
+    <div style={{maxWidth:600,margin:"0 auto"}}>
+      <div className="card" style={{textAlign:"center",padding:40}}>
+        <div style={{fontSize:60,marginBottom:16}}>👅</div>
+        <div style={{fontFamily:"var(--fh)",fontSize:22,fontWeight:800,marginBottom:8}}>Halo, {user.name}! 👋</div>
+        <div style={{color:"var(--mut)",fontSize:14,marginBottom:20,lineHeight:1.7}}>Kamu akan mengerjakan <strong>Sensory Evaluation Quiz</strong>.<br/>Quiz ini terdiri dari 4 sub-topik:</div>
+        <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20,textAlign:"left"}}>
+          {SENSORY_TOPICS.map(t=>{const qs=(questions[t.id]||[]).length; return <div key={t.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",background:t.color+"22",borderRadius:12,border:`1.5px solid ${t.color}55`}}>
+            <span style={{fontSize:24}}>{t.emoji}</span>
+            <div style={{flex:1}}><div style={{fontWeight:700,fontSize:14}}>{t.label}</div><div style={{fontSize:12,color:"var(--mut)"}}>Bobot {Math.round(t.weight*100)}% · {qs} soal</div></div>
+            <span style={{background:t.color,color:"#fff",borderRadius:99,padding:"3px 11px",fontSize:11,fontWeight:700}}>{Math.round(t.weight*100)}%</span>
+          </div>;})}
+        </div>
+        {/* INSTRUCTIONS */}
+        <div style={{background:"#eaf3fc",border:"1.5px solid #c5dcf2",borderRadius:12,padding:"16px 18px",marginBottom:22,textAlign:"left"}}>
+          <div style={{fontFamily:"var(--fh)",fontWeight:800,fontSize:14,color:"var(--acc)",marginBottom:10,display:"flex",alignItems:"center",gap:8}}>📋 Instruksi Quiz</div>
+          <ol style={{paddingLeft:20,margin:0,fontSize:13,color:"var(--txt)",lineHeight:1.75,fontWeight:500}}>
+            <li>Pastikan kondisi <strong>indera perasa</strong> dalam keadaan baik (tidak sedang sakit, makan, atau merokok 30 menit sebelum quiz).</li>
+            <li>Kerjakan quiz di tempat yang <strong>tenang</strong> dan <strong>fokus</strong>.</li>
+            <li>Jawab setiap soal dengan <strong>jujur</strong> sesuai persepsi sensori kamu — bukan tebak-tebakan.</li>
+            <li>Quiz dikerjakan secara <strong>berurutan</strong> per sub-topik. Semua soal di satu topik harus dijawab sebelum lanjut.</li>
+            <li>Tidak ada batas waktu, tapi usahakan menjawab dengan <strong>respon pertama</strong> kamu.</li>
+            <li>Hasil akan langsung muncul di akhir, dan tersimpan otomatis untuk evaluasi QC Junior Lead.</li>
+          </ol>
+        </div>
+        {allTopics.length===0
+          ? <div className="al aw"><span>⚠️</span>Soal quiz belum tersedia. Hubungi QC Junior Lead.</div>
+          : <button className="btn btn-p" style={{width:"100%",justifyContent:"center",fontSize:16,padding:"14px"}} onClick={startQuiz}>Mulai Quiz →</button>
+        }
+      </div>
+    </div>
+  );
+
+  if(phase==="quiz") {
+    const currentTopic = allTopics[topicIdx];
+    const qs = questions[currentTopic.id]||[];
+    const topicAnswers = answers[currentTopic.id]||{};
+    const answeredCount = Object.keys(topicAnswers).length;
+    const isLastTopic = topicIdx===allTopics.length-1;
+    const allAnswered = answeredCount===qs.length;
+    const goNext = () => {
+      if(!allAnswered){ alert("Jawab semua soal di topik ini dulu ya!"); return; }
+      if(isLastTopic) finishQuiz();
+      else setTopicIdx(i=>i+1);
+    };
+    return (
+      <div style={{maxWidth:700,margin:"0 auto"}}>
+        {/* Progress */}
+        <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
+          {allTopics.map((t,i)=><div key={t.id} style={{
+            flex:1,padding:"8px 12px",borderRadius:10,textAlign:"center",fontSize:12,fontWeight:700,
+            background:i<topicIdx?"var(--grn)":i===topicIdx?t.color:"var(--sur2)",
+            color:i<=topicIdx?"#fff":"var(--mut)",border:"1.5px solid",
+            borderColor:i<topicIdx?"var(--grn)":i===topicIdx?t.color:"var(--bdr)"
+          }}>{i<topicIdx?"✓ ":""}{t.emoji} {t.label}</div>)}
+        </div>
+        <div className="card" style={{borderTop:`4px solid ${currentTopic.color}`}}>
+          <div className="row" style={{marginBottom:20}}>
+            <div style={{fontFamily:"var(--fh)",fontSize:18,fontWeight:800,color:currentTopic.color}}>{currentTopic.emoji} {currentTopic.label}</div>
+            <div className="sp"/>
+            <span style={{fontSize:13,fontWeight:700,color:"var(--mut)"}}>{answeredCount}/{qs.length} dijawab</span>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:20}}>
+            {qs.map((q,qi)=>{
+              const chosen = topicAnswers[qi];
+              return <div key={qi} style={{padding:"16px",background:"#f5faff",borderRadius:12,border:"1.5px solid var(--bdr)"}}>
+                <div style={{fontWeight:700,fontSize:14,marginBottom:12,lineHeight:1.6}}><span style={{color:currentTopic.color,fontWeight:800}}>Q{qi+1}.</span> {q.question}</div>
+                <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                  {q.options.map((opt,oi)=><button key={oi} onClick={()=>setAnswer(currentTopic.id,qi,oi)} style={{
+                    padding:"10px 14px",borderRadius:9,fontSize:14,fontWeight:600,cursor:"pointer",textAlign:"left",border:"2px solid",transition:"all .13s",
+                    borderColor:chosen===oi?currentTopic.color:"var(--bdr)",
+                    background:chosen===oi?currentTopic.color+"18":"#fff",
+                    color:chosen===oi?currentTopic.color:"var(--txt)"
+                  }}>{String.fromCharCode(65+oi)}. {opt}</button>)}
+                </div>
+              </div>;
+            })}
+          </div>
+          <div className="row m20">
+            {topicIdx>0&&<button className="btn btn-g" onClick={()=>setTopicIdx(i=>i-1)}>← Sebelumnya</button>}
+            <div className="sp"/>
+            <button className="btn btn-p" onClick={goNext} style={{background:`linear-gradient(135deg,${currentTopic.color},${currentTopic.color}cc)`}}>
+              {isLastTopic?"🏁 Selesai & Lihat Skor":"Topik Berikutnya →"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if(phase==="result" && result) {
+    const pct = Math.round(result.totalScore*100);
+    const grade = pct>=85?"🌟 Luar Biasa!":pct>=70?"✅ Bagus!":pct>=55?"📈 Cukup":pct>=40?"⚠️ Perlu Latihan":"❗ Perlu Banyak Latihan";
+    const gradeColor = pct>=85?"var(--grn)":pct>=70?"#00897b":pct>=55?"var(--org)":pct>=40?"#ff9800":"var(--red)";
+    return (
+      <div style={{maxWidth:600,margin:"0 auto"}}>
+        <div className="card" style={{textAlign:"center",padding:36}}>
+          <div style={{fontSize:64,marginBottom:12}}>🎯</div>
+          <div style={{fontFamily:"var(--fh)",fontSize:24,fontWeight:800,marginBottom:4}}>Hasil Kamu, {user.name}!</div>
+          <div style={{fontSize:56,fontWeight:800,color:gradeColor,margin:"16px 0",fontFamily:"var(--fh)"}}>{pct}%</div>
+          <div style={{fontSize:20,fontWeight:700,color:gradeColor,marginBottom:24}}>{grade}</div>
+          <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:28,textAlign:"left"}}>
+            {SENSORY_TOPICS.map(t=>{
+              const ts=result.topicScores?.[t.id];
+              const tpct=ts!=null?Math.round(ts*100):null;
+              const contrib=ts!=null?Math.round(ts*t.weight*100):0;
+              return <div key={t.id} style={{background:"#f5faff",borderRadius:12,padding:"14px 16px",border:"1.5px solid var(--bdr)"}}>
+                <div className="row" style={{marginBottom:6}}>
+                  <span style={{fontWeight:700,fontSize:13}}>{t.emoji} {t.label}</span>
+                  <span style={{fontSize:11,color:"var(--mut)",fontWeight:600}}>Bobot {Math.round(t.weight*100)}%</span>
+                  <div className="sp"/>
+                  <span style={{fontWeight:800,fontSize:15,color:tpct===null?"var(--mut)":tpct>=70?"var(--grn)":tpct>=50?"var(--org)":"var(--red)"}}>{tpct!=null?tpct+"%":"—"}</span>
+                </div>
+                <div className="pb"><div className="pf" style={{width:`${tpct||0}%`,background:t.color}}/></div>
+                <div style={{fontSize:11,color:"var(--mut)",marginTop:4,fontWeight:600}}>Kontribusi ke total: <strong style={{color:t.color}}>{contrib}%</strong></div>
+              </div>;
+            })}
+          </div>
+          <button className="btn btn-p" style={{width:"100%",justifyContent:"center"}} onClick={()=>setPhase("intro")}>🔄 Ulangi Quiz</button>
+        </div>
+      </div>
+    );
+  }
+  return null;
+}
 
 // Mount the app
 const root = ReactDOM.createRoot(document.getElementById('root'));

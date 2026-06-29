@@ -227,6 +227,16 @@ const CSS = `
   @keyframes sp{to{transform:rotate(360deg)}}
   .lscreen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px;background:var(--bg)}
   .lscreen .spin{border-color:rgba(21,101,192,.2);border-top-color:var(--br);width:36px;height:36px;border-width:4px}
+
+  .draft-banner{background:#fff8e1;border:1.5px solid #ffe082;border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px;font-size:13px;font-weight:600;color:#e65100}
+  .chip{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:700}
+  .chip-blue{background:#e3f2fd;color:#1565c0}.chip-green{background:#e8f5e9;color:#2e7d32}
+  .validate-box{background:#e8f5e9;border:1.5px solid #a5d6a7;border-radius:12px;padding:14px 18px;margin-top:16px}
+  .delta-pos{color:#2e7d32;font-weight:800}.delta-neg{color:#c62828;font-weight:800}.delta-neu{color:#757575;font-weight:600}
+  .tabs{display:flex;gap:4px;border-bottom:2px solid var(--bdr);margin-bottom:20px}
+  .tab{padding:9px 18px;font-size:14px;font-weight:700;cursor:pointer;border:none;background:none;color:var(--mut);border-bottom:3px solid transparent;margin-bottom:-2px;transition:all .15s;border-radius:8px 8px 0 0}
+  .tab.active{color:var(--br);border-bottom-color:var(--br);background:#e3f2fd}
+  .tab:hover:not(.active){color:var(--txt);background:#f0f8ff}
   @media(max-width:768px){.sidebar{display:none}.topbar{display:flex}.mob-ov.open{display:block}.sr{grid-template-columns:repeat(2,1fr)}.g2{grid-template-columns:1fr}.page{padding:16px}}
 `;
 
@@ -234,130 +244,123 @@ const CSS = `
 // LOGIN — Role Selection
 // ══════════════════════════════════════════════════════
 const JL_PASSWORD = "kitakerenbangetcoyy";
+const VALIDATOR={id:"ast-01308",name:"Muhammad Nashir Effendy",role:"Jr Lead QC CK",employeeId:"AST-01308"};
+const ASSESSORS=[
+  {id:"gina-00898",  name:"Gina Nisrina Yonia",   role:"QC Associate",employeeId:"AST-00898",password:"AST-00898"},
+  {id:"bianca-01295",name:"Bianca Fawwaz Pramono", role:"QC Officer",  employeeId:"AST-01295",password:"AST-01295"},
+  {id:"lussy-01069", name:"Lussy Oktavia",          role:"QC Officer",  employeeId:"01069",    password:"01069"},
+];
 
-function Login({ onLogin }) {
-  const [screen, setScreen] = useState("select"); // "select" | "jl-pw" | "mitra-name"
-  const [pw, setPw] = useState("");
-  const [mitrasList, setMitrasList] = useState([]);
-  const [selectedMitraId, setSelectedMitraId] = useState("");
-  const [err, setErr] = useState("");
+// ── LOCAL STORAGE HELPERS ──────────────────────────────────────
+const LS={get:(k)=>{try{return JSON.parse(localStorage.getItem(k))||null}catch{return null}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}},del:(k)=>{try{localStorage.removeItem(k)}catch{}}};
+const ASSIGN_KEY="qc_assignments_v2";
+const DRAFT_KEY=(uid,mid)=>`qc_draft_v2_${uid}_${mid}`;
+const AN_NOTES_KEY="qc_analytics_notes_v2";
+const EVAL_OWNER_KEY="qc_eval_owners_v2";
+const getAssignments=()=>LS.get(ASSIGN_KEY)||{};
+const saveAssignments=(v)=>LS.set(ASSIGN_KEY,v);
+const getANotes=()=>LS.get(AN_NOTES_KEY)||{};
+const saveANotes=(v)=>LS.set(AN_NOTES_KEY,v);
+const getOwners=()=>LS.get(EVAL_OWNER_KEY)||{};
+const saveOwner=(evalId,uid)=>{const o=getOwners();o[evalId]=uid;LS.set(EVAL_OWNER_KEY,o);};
+const parseNotes=(raw="")=>{const m=raw.match(/^\[by:([^\]]+)\] ?([\s\S]*)/);return m?{assessorMeta:m[1],notes:m[2]}:{assessorMeta:"",notes:raw};};
+const encodeNotes=(uid,name,notes)=>`[by:${uid}|${name}] ${notes}`;
+const getAssessorName=(e)=>{const {assessorMeta}=parseNotes(e.notes||"");if(!assessorMeta)return null;const parts=assessorMeta.split("|");return ASSESSORS.find(a=>a.id===parts[0])?.name||parts[1]||null;};
 
-  useEffect(() => {
-    if (screen === "mitra-name") {
-      db.getMitras().then(m => {
-        setMitrasList(m);
-        setSelectedMitraId(m.length ? m[0].id : "");
-        setErr("");
-      }).catch(e => setErr("Gagal memuat daftar mitra: " + e.message));
-    }
-  }, [screen]);
 
-  const enterJL = () => {
-    if (pw === JL_PASSWORD) {
-      onLogin({ id: "jl", name: "QC Junior Lead", role: "lead" });
-    } else {
-      setErr("Password salah. Coba lagi!");
-    }
-  };
-
-  const enterMitra = () => {
-    if (!selectedMitraId) return setErr("Pilih mitra dulu ya!");
-    const m = mitrasList.find(x => x.id === selectedMitraId);
-    if (!m) return setErr("Mitra tidak ditemukan");
-    onLogin({ id: m.id, name: m.name, role: "mitra" });
-  };
-
-  if (screen === "jl-pw") return (
-    <div className="lg-bg">
-      <div className="lg-c">
-        <button onClick={()=>{setScreen("select");setErr("");setPw("");}} style={{background:"none",border:"none",cursor:"pointer",color:"#5a7a99",fontSize:13,fontWeight:700,marginBottom:18,display:"flex",alignItems:"center",gap:6}}>← Kembali</button>
-        <div className="lg-l">👑 QC <span>Junior Lead</span></div>
-        <div className="lg-s">Masukkan password untuk melanjutkan</div>
-        {err && <div className="al ad" style={{marginBottom:14}}><span>⚠️</span>{err}</div>}
-        <div className="fg"><label className="fl">Password</label>
-          <input className="fi" type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&enterJL()} autoFocus/>
-        </div>
-        <button className="btn btn-p" style={{width:"100%",justifyContent:"center",marginTop:8}} onClick={enterJL}>Masuk →</button>
-      </div>
+function Login({onLogin}){
+  const [screen,setScreen]=useState("select");
+  const [pw,setPw]=useState("");
+  const [selA,setSelA]=useState(ASSESSORS[0].id);
+  const [mitras,setMitras]=useState([]);
+  const [selM,setSelM]=useState("");
+  const [err,setErr]=useState("");
+  useEffect(()=>{if(screen==="mitra-name")db.getMitras().then(m=>{setMitras(m);setSelM(m[0]?.id||"");setErr("");}).catch(e=>setErr(e.message));},[screen]);
+  const back=()=>{setScreen("select");setErr("");setPw("");};
+  const enterJL=()=>{pw===JL_PASSWORD?onLogin({...VALIDATOR,role:"lead"}):setErr("Password salah!");};
+  const enterAssessor=()=>{const a=ASSESSORS.find(x=>x.id===selA);if(!a)return;pw!==a.password?setErr("Password salah! (default: Employee ID)"):onLogin({...a,role:"assessor"});};
+  const enterMitra=()=>{const m=mitras.find(x=>x.id===selM);if(!m)return setErr("Pilih mitra dulu!");onLogin({id:m.id,name:m.name,role:"mitra"});};
+  if(screen==="jl-pw")return(<div className="lg-bg"><div className="lg-c">
+    <button onClick={back} style={{background:"none",border:"none",cursor:"pointer",color:"#5a7a99",fontSize:13,fontWeight:700,marginBottom:18,display:"flex",alignItems:"center",gap:6}}>← Kembali</button>
+    <div className="lg-l">👑 QC <span>Junior Lead</span></div>
+    <div className="lg-s">{VALIDATOR.name} · {VALIDATOR.employeeId}</div>
+    {err&&<div className="al ad" style={{marginBottom:14}}><span>⚠️</span>{err}</div>}
+    <div className="fg"><label className="fl">Password</label><input className="fi" type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&enterJL()} autoFocus/></div>
+    <button className="btn btn-p" style={{width:"100%",justifyContent:"center",marginTop:8}} onClick={enterJL}>Masuk →</button>
+  </div></div>);
+  if(screen==="assessor")return(<div className="lg-bg"><div className="lg-c">
+    <button onClick={back} style={{background:"none",border:"none",cursor:"pointer",color:"#5a7a99",fontSize:13,fontWeight:700,marginBottom:18,display:"flex",alignItems:"center",gap:6}}>← Kembali</button>
+    <div className="lg-l">📋 <span>Assessor Login</span></div>
+    <div className="lg-s">Lakukan penilaian kompetensi mitra</div>
+    {err&&<div className="al ad" style={{marginBottom:14}}><span>⚠️</span>{err}</div>}
+    <div className="fg"><label className="fl">Pilih Assessor</label>
+      <select className="fse" value={selA} onChange={e=>setSelA(e.target.value)}>
+        {ASSESSORS.map(a=><option key={a.id} value={a.id}>{a.name} · {a.role}</option>)}
+      </select>
     </div>
-  );
-
-  if (screen === "mitra-name") return (
-    <div className="lg-bg">
-      <div className="lg-c">
-        <button onClick={()=>{setScreen("select");setErr("");setSelectedMitraId("");}} style={{background:"none",border:"none",cursor:"pointer",color:"#5a7a99",fontSize:13,fontWeight:700,marginBottom:18,display:"flex",alignItems:"center",gap:6}}>← Kembali</button>
-        <div className="lg-l">🙋 QC <span>Mitra</span></div>
-        <div className="lg-s">Pilih mitra dari daftar</div>
-        {err && <div className="al ad" style={{marginBottom:14}}><span>⚠️</span>{err}</div>}
-        <div className="fg"><label className="fl">Mitra</label>
-          <select className="fse" value={selectedMitraId} onChange={e=>setSelectedMitraId(e.target.value)} autoFocus>
-            <option value="">-- Pilih mitra --</option>
-            {mitrasList.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
-        </div>
-        <button className="btn btn-p" style={{width:"100%",justifyContent:"center",marginTop:8}} onClick={enterMitra}>Mulai Quiz →</button>
-      </div>
+    <div className="fg"><label className="fl">Password (default: Employee ID)</label><input className="fi" type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&enterAssessor()} autoFocus/></div>
+    <button className="btn btn-p" style={{width:"100%",justifyContent:"center",marginTop:8}} onClick={enterAssessor}>Masuk sebagai Assessor →</button>
+  </div></div>);
+  if(screen==="mitra-name")return(<div className="lg-bg"><div className="lg-c">
+    <button onClick={back} style={{background:"none",border:"none",cursor:"pointer",color:"#5a7a99",fontSize:13,fontWeight:700,marginBottom:18,display:"flex",alignItems:"center",gap:6}}>← Kembali</button>
+    <div className="lg-l">🙋 QC <span>Mitra</span></div>
+    <div className="lg-s">Pilih nama dari daftar</div>
+    {err&&<div className="al ad" style={{marginBottom:14}}><span>⚠️</span>{err}</div>}
+    <div className="fg"><label className="fl">Mitra</label>
+      <select className="fse" value={selM} onChange={e=>setSelM(e.target.value)} autoFocus>
+        <option value="">-- Pilih mitra --</option>
+        {mitras.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
+      </select>
     </div>
-  );
-
-  return (
-    <div className="lg-bg">
-      <div className="lg-c">
-        <div className="lg-l">QC <span>Matrix</span> ⭐</div>
-        <div className="lg-s">Central Kitchen · Pilih profil untuk melanjutkan</div>
-        <div style={{display:"flex",flexDirection:"column",gap:14,marginTop:8}}>
-          <button onClick={()=>{setErr("");setScreen("jl-pw");}} style={{background:"linear-gradient(135deg,#1e88e5,#1565c0)",border:"none",borderRadius:14,padding:"20px 22px",cursor:"pointer",textAlign:"left",color:"#fff",boxShadow:"0 4px 18px rgba(21,101,192,.3)",transition:"transform .15s"}}
-            onMouseEnter={e=>e.currentTarget.style.transform="translateY(-2px)"} onMouseLeave={e=>e.currentTarget.style.transform=""}>
-            <div style={{fontSize:28,marginBottom:6}}>👑</div>
-            <div style={{fontFamily:"var(--fh)",fontSize:16,fontWeight:800}}>QC Junior Lead</div>
-            <div style={{fontSize:12,opacity:.8,marginTop:3}}>Akses penuh · Kelola soal & lihat hasil quiz</div>
-          </button>
-          <button onClick={()=>{setErr("");setScreen("mitra-name");}} style={{background:"#fff",border:"2px solid var(--bdr)",borderRadius:14,padding:"20px 22px",cursor:"pointer",textAlign:"left",color:"var(--txt)",boxShadow:"var(--sh)",transition:"transform .15s"}}
-            onMouseEnter={e=>e.currentTarget.style.transform="translateY(-2px)"} onMouseLeave={e=>e.currentTarget.style.transform=""}>
-            <div style={{fontSize:28,marginBottom:6}}>🙋</div>
-            <div style={{fontFamily:"var(--fh)",fontSize:16,fontWeight:800}}>QC Mitra</div>
-            <div style={{fontSize:12,color:"var(--mut)",marginTop:3}}>Ikuti Sensory Evaluation Quiz</div>
-          </button>
-        </div>
-      </div>
+    <button className="btn btn-p" style={{width:"100%",justifyContent:"center",marginTop:8}} onClick={enterMitra}>Mulai Quiz →</button>
+  </div></div>);
+  return(<div className="lg-bg"><div className="lg-c">
+    <div className="lg-l">QC <span>Matrix</span> ⭐</div>
+    <div className="lg-s">Central Kitchen · Pilih profil untuk melanjutkan</div>
+    <div style={{display:"flex",flexDirection:"column",gap:14,marginTop:8}}>
+      {[{scr:"jl-pw",bg:"linear-gradient(135deg,#1e88e5,#1565c0)",icon:"👑",title:"QC Junior Lead",sub:VALIDATOR.name+" · Validasi & monitoring",sh:"rgba(21,101,192,.3)"},
+        {scr:"assessor",bg:"linear-gradient(135deg,#00897b,#00695c)",icon:"📋",title:"Assessor",sub:"Gina · Bianca · Lussy",sh:"rgba(0,137,123,.3)"},
+      ].map(b=><button key={b.scr} onClick={()=>{setErr("");setPw("");setScreen(b.scr);}} style={{background:b.bg,border:"none",borderRadius:14,padding:"20px 22px",cursor:"pointer",textAlign:"left",color:"#fff",boxShadow:`0 4px 18px ${b.sh}`,transition:"transform .15s"}} onMouseEnter={e=>e.currentTarget.style.transform="translateY(-2px)"} onMouseLeave={e=>e.currentTarget.style.transform=""}>
+        <div style={{fontSize:28,marginBottom:6}}>{b.icon}</div>
+        <div style={{fontFamily:"var(--fh)",fontSize:16,fontWeight:800}}>{b.title}</div>
+        <div style={{fontSize:12,opacity:.8,marginTop:3}}>{b.sub}</div>
+      </button>)}
+      <button onClick={()=>{setErr("");setScreen("mitra-name");}} style={{background:"#fff",border:"2px solid var(--bdr)",borderRadius:14,padding:"20px 22px",cursor:"pointer",textAlign:"left",color:"var(--txt)",boxShadow:"var(--sh)",transition:"transform .15s"}} onMouseEnter={e=>e.currentTarget.style.transform="translateY(-2px)"} onMouseLeave={e=>e.currentTarget.style.transform=""}>
+        <div style={{fontSize:28,marginBottom:6}}>🙋</div>
+        <div style={{fontFamily:"var(--fh)",fontSize:16,fontWeight:800}}>QC Mitra</div>
+        <div style={{fontSize:12,color:"var(--mut)",marginTop:3}}>Ikuti Sensory Evaluation Quiz</div>
+      </button>
     </div>
-  );
+  </div></div>);
 }
 
-// ══════════════════════════════════════════════════════
-// SIDEBAR CONTENT
-// ══════════════════════════════════════════════════════
-function Nav({ page, setPage, user, onLogout, onClose }) {
-  const leadItems = [
+function Nav({page,setPage,user,onLogout,onClose}){
+  const items=user.role==="lead"?[
     {id:"dashboard",l:"Dashboard",i:"🏠"},{id:"mitras",l:"Mitra List",i:"👥"},
     {id:"evaluations",l:"Evaluations",i:"📋"},{id:"competencies",l:"Competencies",i:"📚"},
     {id:"analytics",l:"Analytics",i:"📊"},{id:"heatmap",l:"Skill Heatmap",i:"🗺️"},
-    {id:"sensory",l:"Sensory Evaluation",i:"👅"},
-  ];
-  const mitraItems = [{id:"sensory",l:"Sensory Evaluation",i:"👅"}];
-  const items = user.role === "mitra" ? mitraItems : leadItems;
-  const go = id => { setPage(id); onClose?.(); };
-  return (
-    <>
-      <div className="sl"><div className="sl-t">QC <span>Matrix</span> ⭐</div><div className="sl-s">Central Kitchen · Skill Tracker</div></div>
-      <div style={{padding:"12px 0",flex:1}}>
-        <div className="ns">Navigation</div>
-        {items.map(n=><button key={n.id} className={`ni ${page===n.id?"active":""}`} onClick={()=>go(n.id)}><span>{n.i}</span>{n.l}</button>)}
-      </div>
-      <div style={{borderTop:"1px solid rgba(255,255,255,.12)",paddingBottom:12}}>
-        <div className="ns">Logged In As</div>
-        <button className="up" onClick={onLogout}>
-          <div className="av" style={{width:30,height:30,fontSize:13}}>{user.name[0]}</div>
-          <div><div className="un">{user.name}</div><div className="ur">{user.role==="lead"?"👑 QC Junior Lead":"🙋 QC Mitra"} · Logout</div></div>
-        </button>
-      </div>
-    </>
-  );
+    {id:"assessors",l:"Assessors",i:"👤"},{id:"sensory",l:"Sensory Eval",i:"👅"},
+  ]:user.role==="assessor"?[
+    {id:"dashboard",l:"Dashboard",i:"🏠"},{id:"evaluations",l:"My Evaluations",i:"📋"},{id:"sensory",l:"Sensory Eval",i:"👅"},
+  ]:[{id:"sensory",l:"Sensory Evaluation",i:"👅"}];
+  const go=id=>{setPage(id);onClose?.();};
+  const roleLabel=user.role==="lead"?"👑 Jr Lead QC":user.role==="assessor"?"📋 Assessor":"🙋 QC Mitra";
+  return(<>
+    <div className="sl"><div className="sl-t">QC <span>Matrix</span> ⭐</div><div className="sl-s">Central Kitchen · Skill Tracker</div></div>
+    <div style={{padding:"12px 0",flex:1}}>
+      <div className="ns">Navigation</div>
+      {items.map(n=><button key={n.id} className={`ni ${page===n.id?"active":""}`} onClick={()=>go(n.id)}><span>{n.i}</span>{n.l}</button>)}
+    </div>
+    <div style={{borderTop:"1px solid rgba(255,255,255,.12)",paddingBottom:12}}>
+      <div className="ns">Logged In As</div>
+      <button className="up" onClick={onLogout}>
+        <div className="av" style={{width:30,height:30,fontSize:13}}>{user.name[0]}</div>
+        <div><div className="un">{user.name}</div><div className="ur">{roleLabel} · Logout</div></div>
+      </button>
+    </div>
+  </>);
 }
 
-// ══════════════════════════════════════════════════════
-// MAIN APP
-// ══════════════════════════════════════════════════════
 function App() {
   const [user, setUser] = useState(null);
   const [page, setPage] = useState("dashboard");
@@ -394,6 +397,12 @@ function App() {
 
   const richEvals = useMemo(()=>evals.map(e=>({...e,mitraId:e.mitra_id,date:e.eval_date,scores:scMap[e.id]||{}})),[evals,scMap]);
 
+
+  const owners=getOwners();
+  const myEvals=useMemo(()=>{
+    if(!user||user.role==="lead")return richEvals;
+    return richEvals.filter(e=>owners[e.id]===user.id||(assignments[user.id]||[]).includes(e.mitra_id));
+  },[richEvals,user]);
   const lastOk = useCallback((mid)=>richEvals.filter(e=>e.mitra_id===mid&&e.status==="Approved").sort((a,b)=>new Date(b.eval_date)-new Date(a.eval_date))[0]||null,[richEvals]);
 
   const mStats = useMemo(()=>mitras.map(m=>{
@@ -561,35 +570,64 @@ function Mitras({mStats,user,setModal,delMitra,expMitras}){
   </div>;
 }
 
-function Evals({evals,mitras,user,setModal,updStatus,expEvals}){
-  const [tab,setTab]=useState("all");
-  const list=[...evals].filter(e=>tab==="all"||e.status===tab).sort((a,b)=>new Date(b.eval_date)-new Date(a.eval_date));
-  return <div className="page">
-    <div className="ph row"><div><div className="pt">📋 Evaluations</div><div className="ps">All competency assessments</div></div><div className="sp"/>
-      <button className="btn btn-g sm" onClick={expEvals}>⬇ Export</button>
-      <button className="btn btn-p" onClick={()=>setModal({type:"eval-wizard",data:{}})}>+ New Evaluation</button>
+function Evals({ evals, myEvals, mitras, user, setModal, updStatus, expEvals }) {
+  const [tab, setTab] = useState('all');
+  const display = user.role === 'assessor' ? myEvals : evals;
+  const owners = getOwners();
+  const list = [...display]
+    .filter(e => tab === 'all' || e.status === tab)
+    .sort((a, b) => new Date(b.eval_date) - new Date(a.eval_date));
+  return (
+    <div className="page">
+      <div className="ph row">
+        <div><div className="pt">📋 Evaluations</div><div className="ps">{user.role==="assessor"?"Your assessments":"All competency assessments"}</div></div>
+        <div className="sp" />
+        {user.role==="lead" && <button className="btn btn-g sm" onClick={expEvals}>⬇ Export</button>}
+        <button className="btn btn-p" onClick={() => setModal({ type: 'eval-wizard', data: {} })}>+ New Evaluation</button>
+      </div>
+      <div className="tabs">
+        {['all','Draft','Submitted','Approved'].map(t => (
+          <button key={t} className={`tab ${tab===t?'active':''}`} onClick={() => setTab(t)}>
+            {t==='all'?'All':t}
+            <span style={{marginLeft:6,fontSize:10,background:"var(--sur2)",borderRadius:99,padding:"1px 7px"}}>
+              {t==='all'?display.length:display.filter(e=>e.status===t).length}
+            </span>
+          </button>
+        ))}
+      </div>
+      <div className="card"><div className="tw"><table><thead><tr>
+        <th>Mitra</th><th>Date</th><th>Score</th><th>Assessor</th><th>Notes</th><th>Status</th><th>Actions</th>
+      </tr></thead>
+        <tbody>
+          {list.length === 0 && <tr><td colSpan={7}><div className="es"><div className="ei">📋</div>No evaluations</div></td></tr>}
+          {list.map(e => {
+            const m = mitras.find(x => x.id === e.mitra_id);
+            const aName = getAssessorName(e);
+            const { notes } = parseNotes(e.notes || '');
+            return (
+              <tr key={e.id}>
+                <td><div className="row"><div className="av">{m?.name?.[0]||'?'}</div><span style={{fontWeight:600}}>{m?.name||'Unknown'}</span></div></td>
+                <td style={{fontSize:12}}>{fmtDate(e.eval_date)}</td>
+                <td style={{fontWeight:700}}>{avgScore(e.scores)}/5</td>
+                <td>{aName ? <span className="chip chip-blue">📋 {aName}</span> : <span style={{color:"var(--mut)",fontSize:12}}>JL</span>}</td>
+                <td style={{fontSize:12,color:"var(--mut)",maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{notes||'—'}</td>
+                <td><span className={`badge ${e.status}`}>{e.status}</span></td>
+                <td><div className="gr">
+                  <button className="btn btn-g xs" onClick={() => setModal({ type: 'eval-detail', data: e })}>Details</button>
+                  {user.role==="lead" && e.status==="Submitted" && (
+                    <button className="btn btn-ok xs" onClick={() => updStatus(e.id, 'Approved')}>✅ Validate</button>
+                  )}
+                  {e.status === 'Draft' && (user.role==="lead" || (user.role==="assessor" && owners[e.id]===user.id)) && (
+                    <button className="btn btn-g xs" onClick={() => setModal({ type: 'eval-wizard', data: e })}>Edit</button>
+                  )}
+                </div></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table></div></div>
     </div>
-    <div className="tabs">{["all","Draft","Submitted","Approved"].map(t=><button key={t} className={`tab ${tab===t?"active":""}`} onClick={()=>setTab(t)}>
-      {t==="all"?"All":t}<span style={{marginLeft:6,fontSize:10,background:"var(--sur2)",borderRadius:99,padding:"1px 7px"}}>{t==="all"?evals.length:evals.filter(e=>e.status===t).length}</span>
-    </button>)}</div>
-    <div className="card"><div className="tw"><table><thead><tr><th>Mitra</th><th>Date</th><th>Score</th><th>Notes</th><th>Status</th><th>Actions</th></tr></thead>
-      <tbody>
-        {list.length===0&&<tr><td colSpan={6}><div className="es"><div className="ei">📋</div>No evaluations</div></td></tr>}
-        {list.map(e=>{const m=mitras.find(x=>x.id===e.mitra_id); return <tr key={e.id}>
-          <td><div className="row"><div className="av">{m?.name?.[0]||"?"}</div><span style={{fontWeight:600}}>{m?.name||"Unknown"}</span></div></td>
-          <td style={{fontSize:12}}>{fmtDate(e.eval_date)}</td>
-          <td style={{fontWeight:700}}>{avgScore(e.scores)}/5</td>
-          <td style={{fontSize:12,color:"var(--mut)",maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.notes||"—"}</td>
-          <td><span className={`badge ${e.status}`}>{e.status}</span></td>
-          <td><div className="gr">
-            <button className="btn btn-g xs" onClick={()=>setModal({type:"eval-detail",data:e})}>Details</button>
-            {user.role==="lead"&&e.status==="Submitted"&&<button className="btn btn-ok xs" onClick={()=>updStatus(e.id,"Approved")}>✅ Approve</button>}
-            {e.status!=="Approved"&&<button className="btn btn-g xs" onClick={()=>setModal({type:"eval-wizard",data:e})}>Edit</button>}
-          </div></td>
-        </tr>;})}
-      </tbody>
-    </table></div></div>
-  </div>;
+  );
 }
 
 function Comps({categories,user,setModal,delCat}){
@@ -725,129 +763,171 @@ function Heatmap({mitras,evals,allSubs,categories}){
 // ══════════════════════════════════════════════════════
 // EVAL WIZARD
 // ══════════════════════════════════════════════════════
-function EvalWizard({data,mitras,categories,allSubs,user,onSave,onClose}){
-  const es={}; allSubs.forEach(s=>es[s.id]=3);
-  const [step,setStep]=useState(1); const [busy,setBusy]=useState(false);
-  const [form,setForm]=useState({mitraId:data?.mitraId||data?.mitra_id||"",date:data?.eval_date||new Date().toISOString().split("T")[0],status:"Draft",notes:data?.notes||"",id:data?.id||null,scores:{...es,...(data?.scores||{})}});
-  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const setScore=(sid,v)=>setForm(f=>({...f,scores:{...f.scores,[sid]:v}}));
-  const sm=mitras.find(m=>m.id===form.mitraId);
-  const steps=["Select Mitra","Score Competencies","Review & Submit"];
-  const doSave=async st=>{ setBusy(true); try{await onSave({...form,status:st});}finally{setBusy(false);} };
-  return <div className="mb"><div className="mo mol">
-    <button className="mc" onClick={onClose}>✕</button>
-    <div className="mt2">{data?.id?"Edit Evaluation":"New Evaluation"}</div>
-    <div className="ws" style={{marginBottom:24}}>
-      {steps.map((label,i)=>{const n=i+1,done=step>n,active=step===n; return <div key={n} className="wst">
-        <div className={`wc ${done?"done":active?"active":"pend"}`}>{done?"✓":n}</div>
-        <span className={`wl ${active?"active":""}`}>{label}</span>
-        {i<steps.length-1&&<div className={`wln ${done?"done":""}`}/>}
-      </div>;})}
-    </div>
-    {step===1&&<div>
-      <div className="fg"><label className="fl">Select Mitra *</label>
-        <select className="fse" value={form.mitraId} onChange={e=>set("mitraId",e.target.value)}>
-          <option value="">Choose a Mitra…</option>
-          {mitras.map(m=><option key={m.id} value={m.id}>{m.name} ({m.employee_id})</option>)}
-        </select>
-      </div>
-      {sm&&<div style={{background:"#e3f2fd",borderRadius:12,padding:16,border:"1.5px solid #90caf9",marginTop:8}}>
-        <div className="row"><div className="av" style={{width:44,height:44,fontSize:18}}>{sm.name[0]}</div>
-          <div><div style={{fontWeight:800,fontSize:15}}>{sm.name}</div><div style={{fontSize:12,color:"var(--mut)",marginTop:2}}>{sm.employee_id} · Joined {sm.join_date}</div></div>
-        </div>
-      </div>}
-      <div className="fg m16"><label className="fl">Evaluation Date</label><input className="fi" type="date" value={form.date} onChange={e=>set("date",e.target.value)}/></div>
-      <div className="row m20"><div className="sp"/><button className="btn btn-p" onClick={()=>form.mitraId&&setStep(2)} disabled={!form.mitraId}>Next: Score Competencies →</button></div>
-    </div>}
-    {step===2&&<div>
-      <div className="al ai"><span>💡</span>Score 1 (very poor) to 5 (excellent). Tap a number to select.</div>
-      {categories.map(cat=><div key={cat.id} style={{marginBottom:20}}>
-        <div style={{fontFamily:"var(--fh)",fontWeight:800,fontSize:14,color:"var(--acc)",marginBottom:10,padding:"8px 12px",background:"var(--sur2)",borderRadius:8,display:"flex",alignItems:"center",gap:8}}>
-          📁 {cat.name}<span style={{marginLeft:"auto",fontSize:11,fontWeight:600,color:"var(--mut)"}}>avg: {(cat.subs.reduce((s,sub)=>s+(form.scores[sub.id]||0),0)/cat.subs.length).toFixed(1)}/5</span>
-        </div>
-        {cat.subs.map(sub=><div key={sub.id} className="srow">
-          <span className="slbl">{sub.name}</span>
-          <div className="sbts">{[1,2,3,4,5].map(v=><button key={v} className={`sbt v${v} ${form.scores[sub.id]===v?"act":""}`} onClick={()=>setScore(sub.id,v)}>{v}</button>)}</div>
-        </div>)}
-      </div>)}
-      <div className="row m16"><button className="btn btn-g" onClick={()=>setStep(1)}>← Back</button><div className="sp"/>
-        <span style={{fontSize:13,fontWeight:700,color:"var(--mut)"}}>Overall: <span style={{color:"var(--br)",fontSize:16}}>{avgScore(form.scores)}</span>/5</span>
-        <button className="btn btn-p" onClick={()=>setStep(3)}>Next: Review →</button>
-      </div>
-    </div>}
-    {step===3&&<div>
-      <div style={{background:"#f5faff",border:"1.5px solid var(--bdr)",borderRadius:12,padding:16,marginBottom:16}}>
-        <div className="row" style={{marginBottom:12}}>
-          <div className="av" style={{width:44,height:44,fontSize:18}}>{sm?.name[0]}</div>
-          <div><div style={{fontWeight:800,fontSize:15}}>{sm?.name}</div><div style={{fontSize:12,color:"var(--mut)"}}>{fmtDate(form.date)}</div></div>
-          <div className="sp"/><div style={{textAlign:"right"}}><div style={{fontSize:11,color:"var(--mut)",fontWeight:700}}>Overall Score</div><div style={{fontSize:28,fontWeight:800,color:"var(--br)"}}>{avgScore(form.scores)}<span style={{fontSize:14,color:"var(--mut)"}}>/ 5</span></div></div>
-        </div>
-        {categories.map(cat=><div key={cat.id} style={{marginBottom:10}}>
-          <div style={{fontSize:12,fontWeight:800,color:"var(--acc)",marginBottom:6}}>{cat.name}</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:6}}>
-            {cat.subs.map(sub=>{const s=form.scores[sub.id]||0; return <div key={sub.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#fff",border:"1.5px solid var(--bdr)",borderRadius:8,padding:"6px 10px"}}>
-              <span style={{fontSize:12,fontWeight:600}}>{sub.name}</span>
-              <span style={{fontWeight:800,fontSize:14,color:s>=4?"var(--grn)":s>=3?"var(--org)":"var(--red)"}}>{s}</span>
-            </div>;})}
-          </div>
-        </div>)}
-      </div>
-      <div className="fg"><label className="fl">Notes</label><textarea className="fta" value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Add notes or observations…"/></div>
-      <div className="row m16">
-        <button className="btn btn-g" onClick={()=>setStep(2)}>← Back</button><div className="sp"/>
-        <button className="btn btn-g" onClick={()=>doSave("Draft")} disabled={busy}>💾 Save Draft</button>
-        <button className="btn btn-p" onClick={()=>doSave("Submitted")} disabled={busy}>{busy?<span className="spin"/>:"📤 Submit for Approval"}</button>
-      </div>
-    </div>}
-  </div></div>;
-}
+function EvalWizard({ data, mitras, categories, allSubs, user, onSave, onClose }) {
+  const emptyScores = {};
+  allSubs.forEach(s => emptyScores[s.id] = 3);
+  const [step, setStep] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [hasDraft, setHasDraft] = useState(false);
+  const [form, setForm] = useState({
+    mitraId: data?.mitraId || data?.mitra_id || '',
+    date: data?.eval_date || new Date().toISOString().split('T')[0],
+    status: 'Draft',
+    notes: parseNotes(data?.notes || '').notes,
+    id: data?.id || null,
+    scores: { ...emptyScores, ...(data?.scores || {}) }
+  });
+  const setF = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const setScore = (sid, v) => setForm(f => ({ ...f, scores: { ...f.scores, [sid]: v } }));
+  const selMitra = mitras.find(m => m.id === form.mitraId);
+  const steps = ['Select Mitra', 'Score Competencies', 'Review & Submit'];
 
-// ══════════════════════════════════════════════════════
-// OTHER MODALS
-// ══════════════════════════════════════════════════════
-function MitraDetail({mitra,evals,categories,allSubs,onClose,setModal}){
-  const [tab,setTab]=useState("overview");
-  const ok=evals.filter(e=>e.status==="Approved").sort((a,b)=>new Date(b.eval_date)-new Date(a.eval_date));
-  const latest=ok[0];
-  const es=latest?((today-new Date(latest.eval_date))/86400000<=50?"on-time":(today-new Date(latest.eval_date))/86400000<=60?"due-soon":"overdue"):"overdue";
-  const rd=categories.map(cat=>({subject:cat.name.replace(" Process",""),score:latest?Number((cat.subs.reduce((s,sub)=>s+(latest.scores[sub.id]||0),0)/cat.subs.length).toFixed(1)):0,fullMark:5}));
-  return <div className="mb"><div className="mo mol">
-    <button className="mc" onClick={onClose}>✕</button>
-    <div className="row" style={{marginBottom:20}}>
-      <div className="av" style={{width:50,height:50,fontSize:20}}>{mitra.name[0]}</div>
-      <div><div style={{fontFamily:"var(--fh)",fontWeight:800,fontSize:18}}>{mitra.name}</div><div style={{fontSize:12,color:"var(--mut)",marginTop:2}}>{mitra.employee_id||mitra.employeeId} · Joined {mitra.join_date||mitra.joinDate}</div></div>
-      <div className="sp"/><span className={`badge ${es}`}>{es==="on-time"?"✅ On Time":es==="due-soon"?"⏳ Due Soon":"⚠️ Overdue"}</span>
-      <button className="btn btn-p sm" onClick={()=>{onClose();setModal({type:"eval-wizard",data:{mitraId:mitra.id}});}}>+ Evaluate</button>
-    </div>
-    <div className="tabs">{["overview","timeline"].map(t=><button key={t} className={`tab ${tab===t?"active":""}`} onClick={()=>setTab(t)}>{t==="overview"?"📊 Overview":"🕒 History"}</button>)}</div>
-    {tab==="overview"&&(!latest?<div className="es"><div className="ei">📊</div>No approved evaluations yet.</div>:
-      <div className="g2">
-        <div><div style={{fontSize:12,fontWeight:700,color:"var(--mut)",textTransform:"uppercase",marginBottom:10}}>Competency Radar</div>
-          <div className="rw" style={{height:260}}><ResponsiveContainer width="100%" height="100%"><RadarChart data={rd}>
-            <PolarGrid stroke="#b8d9f0"/><PolarAngleAxis dataKey="subject" tick={{fill:"var(--mut)",fontSize:10}}/>
-            <PolarRadiusAxis angle={90} domain={[0,5]} tick={{fill:"var(--mut)",fontSize:9}} tickCount={6}/>
-            <Radar dataKey="score" stroke="#2196f3" fill="#2196f3" fillOpacity={0.2} strokeWidth={2.5}/>
-            <Tooltip contentStyle={{background:"#fff",border:"1.5px solid var(--bdr)",borderRadius:10,fontSize:12}}/>
-          </RadarChart></ResponsiveContainer></div>
+  // draft helpers
+  const draftKey = DRAFT_KEY(user.id, form.mitraId);
+  const checkDraft = (mid) => {
+    if (!mid || data?.id) return;
+    if (LS.get(DRAFT_KEY(user.id, mid))) setHasDraft(true);
+  };
+  const restoreDraft = () => {
+    const saved = LS.get(DRAFT_KEY(user.id, form.mitraId));
+    if (saved) { setForm(saved.form); setStep(saved.step || 1); }
+    setHasDraft(false);
+  };
+  // auto-save every 1.5s after change
+  useEffect(() => {
+    if (!form.mitraId || data?.id) return;
+    const t = setTimeout(() => LS.set(DRAFT_KEY(user.id, form.mitraId), { form, step, savedAt: new Date().toISOString() }), 1500);
+    return () => clearTimeout(t);
+  }, [form, step]);
+
+  const doSave = async (st) => { setBusy(true); try { await onSave({ ...form, status: st }); } finally { setBusy(false); } };
+  const overall = avgScore(form.scores);
+
+  return (
+    <div className="mb"><div className="mo mol">
+      <button className="mc" onClick={onClose}>✕</button>
+      <div className="mt2">{data?.id ? 'Edit Evaluation' : 'New Evaluation'}</div>
+
+      {hasDraft && (
+        <div className="draft-banner">
+          <span>💾</span>
+          <div style={{flex:1}}>Draft tersimpan ditemukan untuk mitra ini.</div>
+          <button className="btn btn-warn xs" onClick={restoreDraft}>Lanjutkan Draft</button>
+          <button className="btn btn-g xs" onClick={() => setHasDraft(false)}>Mulai Baru</button>
         </div>
-        <div><div style={{fontSize:12,fontWeight:700,color:"var(--mut)",textTransform:"uppercase",marginBottom:10}}>Latest Scores</div>
-          {allSubs.map(sub=>{const s=latest.scores[sub.id]||0; return <div key={sub.id} style={{marginBottom:8}}>
-            <div className="row" style={{marginBottom:3}}><span style={{fontSize:12,fontWeight:600}}>{sub.name}</span><div className="sp"/><span style={{fontWeight:800,fontSize:12,color:s>=4?"var(--grn)":s>=3?"var(--org)":"var(--red)"}}>{s}/5</span></div>
-            <div className="pb"><div className="pf" style={{width:`${(s/5)*100}%`,background:s>=4?"var(--grn)":s>=3?"var(--org)":"var(--red)"}}/></div>
-          </div>;})}
-        </div>
+      )}
+      {form.mitraId && !data?.id && (
+        <div style={{fontSize:11,color:"var(--mut)",marginBottom:12,textAlign:"right"}}>💾 Draft tersimpan otomatis</div>
+      )}
+
+      <div className="ws" style={{marginBottom:24}}>
+        {steps.map((label, i) => {
+          const n = i + 1, done = step > n, active = step === n;
+          return (
+            <div key={n} className="wst">
+              <div className={`wc ${done ? 'done' : active ? 'active' : 'pend'}`}>{done ? '✓' : n}</div>
+              <span className={`wl ${active ? 'active' : ''}`}>{label}</span>
+              {i < steps.length - 1 && <div className={`wln ${done ? 'done' : ''}`} />}
+            </div>
+          );
+        })}
       </div>
-    )}
-    {tab==="timeline"&&(evals.length===0?<div className="es"><div className="ei">🕒</div>No evaluations yet.</div>:
-      <div className="tl">{[...evals].sort((a,b)=>new Date(b.eval_date)-new Date(a.eval_date)).map(e=><div key={e.id} className="ti">
-        <div><div className="td" style={{background:e.status==="Approved"?"var(--grn)":e.status==="Submitted"?"var(--br)":"var(--mut)"}}/><div className="tline"/></div>
-        <div className="tc">
-          <div className="row" style={{marginBottom:4}}><span style={{fontWeight:700,fontSize:13}}>{fmtDate(e.eval_date)}</span><span className={`badge ${e.status}`} style={{fontSize:11}}>{e.status}</span><div className="sp"/><span style={{fontWeight:800,color:"var(--br)"}}>{avgScore(e.scores)}/5</span></div>
-          {e.notes&&<div style={{fontSize:12,color:"var(--mut)"}}>{e.notes}</div>}
+
+      {step === 1 && (
+        <div>
+          <div className="fg">
+            <label className="fl">Select Mitra {user.role==="assessor" && <span style={{color:"var(--org)"}}>· assigned to you</span>}</label>
+            <select className="fse" value={form.mitraId} onChange={e => { setF('mitraId', e.target.value); checkDraft(e.target.value); }}>
+              <option value="">Choose a Mitra…</option>
+              {mitras.map(m => <option key={m.id} value={m.id}>{m.name} ({m.employee_id})</option>)}
+            </select>
+          </div>
+          {mitras.length === 0 && user.role === "assessor" && (
+            <div className="al aw"><span>⚠️</span>Kamu belum di-assign ke mitra manapun. Hubungi Jr Lead.</div>
+          )}
+          {selMitra && (
+            <div style={{background:"#e3f2fd",borderRadius:12,padding:16,border:"1.5px solid #90caf9",marginTop:8}}>
+              <div className="row">
+                <div className="av" style={{width:44,height:44,fontSize:18}}>{selMitra.name[0]}</div>
+                <div><div style={{fontWeight:800,fontSize:15}}>{selMitra.name}</div><div style={{fontSize:12,color:"var(--mut)",marginTop:2}}>{selMitra.employee_id}</div></div>
+              </div>
+            </div>
+          )}
+          <div className="fg m16"><label className="fl">Evaluation Date</label><input className="fi" type="date" value={form.date} onChange={e => setF('date', e.target.value)} /></div>
+          <div className="row m20"><div className="sp" /><button className="btn btn-p" onClick={() => form.mitraId && setStep(2)} disabled={!form.mitraId}>Next: Score Competencies →</button></div>
         </div>
-      </div>)}
-    </div>)}
-  </div></div>;
+      )}
+
+      {step === 2 && (
+        <div>
+          <div className="al ai" style={{marginBottom:12}}><span>💡</span>Score 1–5. Draft tersimpan otomatis setiap perubahan.</div>
+          {categories.map(cat => (
+            <div key={cat.id} style={{marginBottom:20}}>
+              <div style={{fontFamily:"var(--fh)",fontWeight:800,fontSize:14,color:"var(--acc)",marginBottom:10,padding:"8px 12px",background:"var(--sur2)",borderRadius:8,display:"flex",alignItems:"center",gap:8}}>
+                📁 {cat.name}
+                <span style={{marginLeft:"auto",fontSize:11,fontWeight:600,color:"var(--mut)"}}>avg: {(cat.subs.reduce((s,sub)=>s+(form.scores[sub.id]||0),0)/cat.subs.length).toFixed(1)}/5</span>
+              </div>
+              {cat.subs.map(sub => (
+                <div key={sub.id} className="srow">
+                  <span className="slbl">{sub.name}</span>
+                  <div className="sbts">{[1,2,3,4,5].map(v => <button key={v} className={`sbt v${v} ${form.scores[sub.id]===v?'act':''}`} onClick={() => setScore(sub.id, v)}>{v}</button>)}</div>
+                </div>
+              ))}
+            </div>
+          ))}
+          <div className="row m16">
+            <button className="btn btn-g" onClick={() => setStep(1)}>← Back</button>
+            <div className="sp" />
+            <span style={{fontSize:13,fontWeight:700,color:"var(--mut)"}}>Overall: <span style={{color:"var(--br)",fontSize:16}}>{overall}</span>/5</span>
+            <button className="btn btn-p" onClick={() => setStep(3)}>Next: Review →</button>
+          </div>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div>
+          <div style={{background:"#f5faff",border:"1.5px solid var(--bdr)",borderRadius:12,padding:16,marginBottom:16}}>
+            <div className="row" style={{marginBottom:12}}>
+              <div className="av" style={{width:44,height:44,fontSize:18}}>{selMitra?.name[0]}</div>
+              <div><div style={{fontWeight:800,fontSize:15}}>{selMitra?.name}</div><div style={{fontSize:12,color:"var(--mut)"}}>{fmtDate(form.date)}</div></div>
+              <div className="sp" />
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:11,color:"var(--mut)",fontWeight:700}}>Overall Score</div>
+                <div style={{fontSize:28,fontWeight:800,color:"var(--br)"}}>{overall}<span style={{fontSize:14,color:"var(--mut)"}}>/5</span></div>
+              </div>
+            </div>
+            {categories.map(cat => (
+              <div key={cat.id} style={{marginBottom:10}}>
+                <div style={{fontSize:12,fontWeight:800,color:"var(--acc)",marginBottom:6}}>{cat.name}</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:6}}>
+                  {cat.subs.map(sub => { const s = form.scores[sub.id] || 0; return (
+                    <div key={sub.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#fff",border:"1.5px solid var(--bdr)",borderRadius:8,padding:"6px 10px"}}>
+                      <span style={{fontSize:11,fontWeight:600}}>{sub.name}</span>
+                      <span style={{fontWeight:800,fontSize:14,color:s>=4?"var(--grn)":s>=3?"var(--org)":"var(--red)"}}>{s}</span>
+                    </div>
+                  );})}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="fg"><label className="fl">Notes / Catatan</label>
+            <textarea className="fta" value={form.notes} onChange={e => setF('notes', e.target.value)} placeholder="Tambahkan catatan atau observasi dari proses assessment ini…" />
+          </div>
+          {user.role === "assessor" && (
+            <div className="al aw" style={{marginBottom:8}}><span>ℹ️</span>Setelah Submit, menunggu validasi dari <strong>{VALIDATOR.name}</strong>.</div>
+          )}
+          <div className="row m16">
+            <button className="btn btn-g" onClick={() => setStep(2)}>← Back</button>
+            <div className="sp" />
+            <button className="btn btn-g" onClick={() => doSave('Draft')} disabled={busy}>💾 Save Draft</button>
+            <button className="btn btn-p" onClick={() => doSave('Submitted')} disabled={busy}>
+              {busy ? <span className="spin" /> : '📤 Submit for Validation'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div></div>
+  );
 }
 
 function EvalDetail({ev:e,mitras,categories,onClose}){

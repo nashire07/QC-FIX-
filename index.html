@@ -21,6 +21,7 @@
 <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
 <script src="https://unpkg.com/@babel/standalone@7.23.5/babel.min.js"></script>
 
+<script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script type="text/babel" data-presets="react">
 const { useState, useMemo, useEffect, useCallback } = React;
 const { RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Tooltip, LineChart, Line, XAxis, YAxis, CartesianGrid, Legend, BarChart, Bar, ComposedChart, Cell, LabelList } = Recharts;
@@ -93,6 +94,20 @@ const getStatus = (d) => { if (!d) return "overdue"; const days=(today-new Date(
 const nextDue   = (d) => { if (!d) return "—"; const x=new Date(d); x.setDate(x.getDate()+60); return x.toLocaleDateString("id-ID",{day:"2-digit",month:"short",year:"numeric"}); };
 const fmtDate   = (d) => d ? new Date(d).toLocaleDateString("id-ID",{day:"2-digit",month:"short",year:"numeric"}) : "—";
 const dlCSV     = (rows,fn) => { const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n"); const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download=fn; a.click(); };
+
+const dlXLSX = (sheetsArr, filename) => {
+  const wb = XLSX.utils.book_new();
+  sheetsArr.forEach(({name, rows}) => {
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    // Auto column widths
+    const colWidths = rows[0]?.map((_,ci) => ({
+      wch: Math.min(40, Math.max(10, ...rows.map(r => String(r[ci]??'').length)))
+    }));
+    if(colWidths) ws['!cols'] = colWidths;
+    XLSX.utils.book_append_sheet(wb, ws, name);
+  });
+  XLSX.writeFile(wb, filename);
+};
 
 // ══════════════════════════════════════════════════════
 // CSS
@@ -335,13 +350,11 @@ function Login({onLogin}){
 }
 
 function Nav({page,setPage,user,onLogout,onClose}){
-  const items=user.role==="lead"?[
+  const items=user.role==="lead"||user.role==="assessor"?[
     {id:"dashboard",l:"Dashboard",i:"🏠"},{id:"mitras",l:"Mitra List",i:"👥"},
     {id:"evaluations",l:"Evaluations",i:"📋"},{id:"competencies",l:"Competencies",i:"📚"},
     {id:"analytics",l:"Analytics",i:"📊"},{id:"heatmap",l:"Skill Heatmap",i:"🗺️"},
-    {id:"assessors",l:"Assessors",i:"👤"},{id:"sensory",l:"Sensory Eval",i:"👅"},
-  ]:user.role==="assessor"?[
-    {id:"dashboard",l:"Dashboard",i:"🏠"},{id:"evaluations",l:"My Evaluations",i:"📋"},{id:"sensory",l:"Sensory Eval",i:"👅"},
+    {id:"sensory",l:"Sensory Eval",i:"👅"},
   ]:[{id:"sensory",l:"Sensory Evaluation",i:"👅"}];
   const go=id=>{setPage(id);onClose?.();};
   const roleLabel=user.role==="lead"?"👑 Jr Lead QC":user.role==="assessor"?"📋 Assessor":"🙋 QC Mitra";
@@ -401,6 +414,7 @@ function App() {
   const owners=getOwners();
   const myEvals=useMemo(()=>{
     if(!user||user.role==="lead")return richEvals;
+    const assignments=getAssignments();
     return richEvals.filter(e=>owners[e.id]===user.id||(assignments[user.id]||[]).includes(e.mitra_id));
   },[richEvals,user]);
   const lastOk = useCallback((mid)=>richEvals.filter(e=>e.mitra_id===mid&&e.status==="Approved").sort((a,b)=>new Date(b.eval_date)-new Date(a.eval_date))[0]||null,[richEvals]);
@@ -456,7 +470,7 @@ function App() {
   if (!user) return <><style>{CSS}</style><Login onLogin={u=>{ setUser(u); setPage(u.role==="mitra"?"sensory":"dashboard"); }}/></>;
   if (loading && user.role!=="mitra") return <><style>{CSS}</style><div className="lscreen"><div className="spin"/><div style={{color:"var(--mut)",fontWeight:600}}>Loading from database…</div></div></>;
 
-  const p = {user,mitras,mStats,evals:richEvals,categories,allSubs,counts,setModal,setPage,delMitra,updStatus,delCat,expMitras,expEvals,saveMitra};
+  const p = {user,mitras,mStats,evals:richEvals,myEvals,categories,allSubs,counts,setModal,setPage,delMitra,updStatus,delCat,expMitras,expEvals,saveMitra};
 
   return (
     <>
@@ -570,19 +584,54 @@ function Mitras({mStats,user,setModal,delMitra,expMitras}){
   </div>;
 }
 
-function Evals({ evals, myEvals, mitras, user, setModal, updStatus, expEvals }) {
+function Evals({ evals, myEvals, mitras, user, setModal, updStatus, expEvals, categories, allSubs }) {
   const [tab, setTab] = useState('all');
   const display = user.role === 'assessor' ? myEvals : evals;
   const owners = getOwners();
   const list = [...display]
     .filter(e => tab === 'all' || e.status === tab)
     .sort((a, b) => new Date(b.eval_date) - new Date(a.eval_date));
+
+  const exportAssessmentXLSX = () => {
+    const subNames = (allSubs||[]).map(s=>s.name);
+    const headerRow = ["Mitra","Tanggal","Status","Assessor","Overall Score", ...subNames, "Notes"];
+    const dataRows = [...evals].sort((a,b)=>new Date(b.eval_date)-new Date(a.eval_date)).map(e => {
+      const m = mitras.find(x=>x.id===e.mitra_id);
+      const aName = getAssessorName(e) || "JL";
+      const {notes} = parseNotes(e.notes||"");
+      const subScores = (allSubs||[]).map(s=>e.scores?.[s.id]??0);
+      return [m?.name||"?", fmtDate(e.eval_date), e.status, aName, avgScore(e.scores), ...subScores, notes||""];
+    });
+    // Sheet 2: latest per mitra summary
+    const latestPerMitra = {};
+    evals.filter(e=>e.status==="Approved").forEach(e=>{
+      if(!latestPerMitra[e.mitra_id]||new Date(e.eval_date)>new Date(latestPerMitra[e.mitra_id].eval_date))
+        latestPerMitra[e.mitra_id]=e;
+    });
+    const summaryRows = [
+      ["Mitra","Last Eval Date","Overall Score","Status",...(categories||[]).map(c=>c.name)],
+      ...Object.values(latestPerMitra).map(e=>{
+        const m=mitras.find(x=>x.id===e.mitra_id);
+        const catAvgs=(categories||[]).map(cat=>{
+          const subs=cat.subs||[];
+          return subs.length?Number((subs.reduce((s,sub)=>s+(e.scores?.[sub.id]||0),0)/subs.length).toFixed(2)):0;
+        });
+        return [m?.name||"?",fmtDate(e.eval_date),avgScore(e.scores),e.status,...catAvgs];
+      })
+    ];
+    const dateStr = new Date().toLocaleDateString("id-ID").replace(/\//g,"-");
+    dlXLSX([
+      {name:"All Assessments", rows:[headerRow,...dataRows]},
+      {name:"Summary (Approved)", rows:summaryRows}
+    ], `Assessment_Results_${dateStr}.xlsx`);
+  };
   return (
     <div className="page">
       <div className="ph row">
         <div><div className="pt">📋 Evaluations</div><div className="ps">{user.role==="assessor"?"Your assessments":"All competency assessments"}</div></div>
         <div className="sp" />
-        {user.role==="lead" && <button className="btn btn-g sm" onClick={expEvals}>⬇ Export</button>}
+        <button className="btn btn-g sm" onClick={exportAssessmentXLSX}>⬇ Export Excel</button>
+        {user.role==="lead" && <button className="btn btn-g sm" onClick={expEvals}>⬇ CSV</button>}
         <button className="btn btn-p" onClick={() => setModal({ type: 'eval-wizard', data: {} })}>+ New Evaluation</button>
       </div>
       <div className="tabs">
@@ -991,10 +1040,9 @@ function CatForm({data,onSave,onClose}){
 // SENSORY EVALUATION PAGE
 // ══════════════════════════════════════════════════════
 const SENSORY_TOPICS = [
-  { id:"rasa",       label:"5 Rasa Dasar",       emoji:"👅", weight:0.10, color:"#b4a7e8", group:"rasa" },
-  { id:"tri",        label:"Triangle Test",      emoji:"🔺", weight:0.30, color:"#9ed4c8", group:"tri" },
-  { id:"rank-manis", label:"Ranking Test: MANIS",emoji:"🍬", weight:0.30, color:"#f4b5a8", group:"rank" },
-  { id:"rank-asin",  label:"Ranking Test: ASIN", emoji:"🧂", weight:0.30, color:"#fbd29a", group:"rank" },
+  { id:"rasa",  label:"5 Rasa Dasar",  emoji:"👅", weight:0.30, color:"#b4a7e8", group:"rasa" },
+  { id:"rank",  label:"Ranking Test",  emoji:"🏆", weight:0.40, color:"#fbd29a", group:"rank" },
+  { id:"tri",   label:"Triangle Test", emoji:"🔺", weight:0.30, color:"#9ed4c8", group:"tri"  },
 ];
 
 // localStorage cache keys
@@ -1027,7 +1075,7 @@ async function fetchSR() {
 }
 
 function SensoryPage({ user }) {
-  const isLead = user.role === "lead";
+  const isLead = user.role === "lead" || user.role === "assessor";
   const [tab, setTab] = useState(isLead ? "manage" : "quiz");
   const [questions, setQuestions] = useState(loadSQCache());
   const [results, setResults] = useState(loadSR());
@@ -1230,7 +1278,7 @@ function SensorySummary({ results }) {
   const sets = { A:new Set(), B:new Set(), C:new Set() };
   Object.values(latestByMitra).forEach(r=>{
     const k = r.mitraId || r.name;
-    const a=groupScore(r,"rasa"), b=groupScore(r,"tri"), c=groupScore(r,"rank");
+    const a=groupScore(r,"rasa"), b=groupScore(r,"rank"), c=groupScore(r,"tri");
     if(a!=null&&a>=0.8) sets.A.add(k);
     if(b!=null&&b>=0.8) sets.B.add(k);
     if(c!=null&&c>=0.8) sets.C.add(k);
@@ -1312,7 +1360,7 @@ function SensorySummary({ results }) {
       {/* VENN */}
       <div className="card" style={cardStyle}>
         <div style={titleStyle}>🔵 Diagram Venn — Mitra ≥ 80%</div>
-        <div style={subStyle}>A = Rasa Dasar · B = Triangle · C = Ranking Test</div>
+        <div style={subStyle}>A = Rasa Dasar · B = Ranking Test · C = Triangle Test</div>
         <div style={{width:"100%",height:320,display:"flex",justifyContent:"center",alignItems:"center"}}>
           <svg viewBox="0 0 360 300" style={{width:"100%",height:"100%"}}>
             <circle cx="135" cy="120" r="92" fill="#b4a7e8" fillOpacity="0.40" stroke="#9d8de0" strokeWidth="2"/>
@@ -1320,8 +1368,8 @@ function SensorySummary({ results }) {
             <circle cx="180" cy="200" r="92" fill="#f4b5a8" fillOpacity="0.40" stroke="#ed9b8a" strokeWidth="2"/>
             {/* labels */}
             <text x="60"  y="50"  fontSize="13" fontWeight="800" fill="#7d6dcc">A: Rasa</text>
-            <text x="255" y="50"  fontSize="13" fontWeight="800" fill="#5fa897">B: Triangle</text>
-            <text x="150" y="290" fontSize="13" fontWeight="800" fill="#d47967">C: Ranking</text>
+            <text x="240" y="50"  fontSize="13" fontWeight="800" fill="#d49a3a">B: Ranking</text>
+            <text x="148" y="290" fontSize="13" fontWeight="800" fill="#5fa897">C: Triangle</text>
             {/* names per region */}
             {renderNames(onlyA, 90, 105)}
             {renderNames(onlyB, 270, 105)}
@@ -1343,6 +1391,40 @@ function SensorySummary({ results }) {
 // ── LEAD: Results ───────────────────────────────────────
 function SensoryResults({ results, setResults }) {
   const fmt = ts => new Date(ts).toLocaleDateString("id-ID",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  const exportXLSX = () => {
+    // Sheet 1: Summary per mitra (latest result only)
+    const latestMap = {};
+    results.forEach(r => {
+      const k = r.mitraId || r.name;
+      if(!latestMap[k] || r.timestamp > latestMap[k].timestamp) latestMap[k] = r;
+    });
+    const topicLabels = SENSORY_TOPICS.map(t=>`${t.emoji} ${t.label} (${Math.round(t.weight*100)}%)`);
+    const summaryRows = [
+      ["Nama Mitra", "Tanggal", ...topicLabels, "Total (%)"],
+      ...Object.values(latestMap).sort((a,b)=>b.totalScore-a.totalScore).map(r => {
+        const totalPct = Math.round((r.totalScore??0)*100);
+        const topicCols = SENSORY_TOPICS.map(t => {
+          const ts = r.topicScores?.[t.id];
+          return ts!=null ? Math.round(ts*100)+"%" : "—";
+        });
+        return [r.name, new Date(r.timestamp).toLocaleDateString("id-ID"), ...topicCols, totalPct+"%"];
+      })
+    ];
+    // Sheet 2: All raw results
+    const allRows = [
+      ["Nama Mitra","Tanggal & Waktu",...topicLabels,"Total (%)"],
+      ...[...results].reverse().map(r => {
+        const totalPct = Math.round((r.totalScore??0)*100);
+        const topicCols = SENSORY_TOPICS.map(t => {
+          const ts = r.topicScores?.[t.id];
+          return ts!=null ? Math.round(ts*100)+"%" : "—";
+        });
+        return [r.name, new Date(r.timestamp).toLocaleString("id-ID"), ...topicCols, totalPct+"%"];
+      })
+    ];
+    const dateStr = new Date().toLocaleDateString("id-ID").replace(/\//g,"-");
+    dlXLSX([{name:"Summary (Latest)", rows:summaryRows},{name:"All Results", rows:allRows}], `Sensory_Results_${dateStr}.xlsx`);
+  };
   const clear = async () => {
     if(!confirm("Hapus semua hasil quiz? Ini tidak bisa dibatalkan.")) return;
     try { for(const r of results){ if(r.id) await db.deleteSensory(r.id); } } catch(e){ alert("Gagal hapus di server: "+e.message); return; }
@@ -1353,6 +1435,7 @@ function SensoryResults({ results, setResults }) {
       <div className="row" style={{marginBottom:16}}>
         <div style={{fontFamily:"var(--fh)",fontSize:16,fontWeight:800}}>Hasil Quiz Mitra</div>
         <div className="sp"/>
+        {results.length>0&&<button className="btn btn-g sm" onClick={exportXLSX}>⬇ Export Excel</button>}
         {results.length>0&&<button className="btn btn-d sm" onClick={clear}>🗑️ Hapus Semua</button>}
       </div>
       {results.length===0 && <div className="es card"><div className="ei">📊</div>Belum ada hasil quiz.</div>}

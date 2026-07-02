@@ -1002,6 +1002,96 @@ function EvalDetail({ev:e,mitras,categories,onClose}){
   </div></div>;
 }
 
+function MitraDetail({mitra:m, evals, categories, allSubs, onClose, setModal}){
+  const sorted = [...evals].sort((a,b)=>new Date(b.eval_date)-new Date(a.eval_date));
+  const latest = sorted[0];
+  const avg = latest ? avgScore(latest.scores) : null;
+  const statusColor = m.evalStatus==='overdue'?'var(--red)':m.evalStatus==='due-soon'?'var(--org)':'var(--grn)';
+
+  // Per-category averages across all approved evals
+  const catAvgs = categories.map(cat=>{
+    const approved = sorted.filter(e=>e.status==='Approved');
+    if(!approved.length) return {cat, avg:null};
+    const catAvg = approved.reduce((sum,e)=>{
+      const subs = cat.subs||[];
+      const s = subs.length ? subs.reduce((ss,sub)=>ss+(e.scores?.[sub.id]||0),0)/subs.length : 0;
+      return sum+s;
+    },0)/approved.length;
+    return {cat, avg:catAvg.toFixed(1)};
+  });
+
+  return <div className="mb"><div className="mo mol" style={{maxWidth:680}}>
+    <button className="mc" onClick={onClose}>✕</button>
+    <div className="mt2">Mitra Profile</div>
+
+    {/* Header card */}
+    <div style={{background:"var(--sur2)",borderRadius:14,padding:16,marginBottom:20,display:"flex",alignItems:"center",gap:16}}>
+      <div className="av" style={{width:54,height:54,fontSize:22,flexShrink:0}}>{m.name?.[0]||"?"}</div>
+      <div style={{flex:1}}>
+        <div style={{fontWeight:800,fontSize:17}}>{m.name}</div>
+        <div style={{fontSize:12,color:"var(--mut)",marginTop:2}}>ID: {m.employee_id||m.employeeId||"—"} · Joined: {fmtDate(m.join_date||m.joinDate)}</div>
+      </div>
+      <div style={{textAlign:"right"}}>
+        <div style={{fontSize:11,color:"var(--mut)",marginBottom:4}}>Status</div>
+        <span style={{background:statusColor+'22',color:statusColor,borderRadius:20,padding:"4px 12px",fontWeight:700,fontSize:12,textTransform:"capitalize"}}>
+          {m.evalStatus==='overdue'?'⚠️ Overdue':m.evalStatus==='due-soon'?'🔔 Due Soon':'✅ On Time'}
+        </span>
+      </div>
+    </div>
+
+    {/* Stats row */}
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:20}}>
+      {[
+        {label:"Total Evals", val:evals.length},
+        {label:"Latest Score", val:avg?`${avg}/5`:"—"},
+        {label:"Next Due", val:m.nextDue||"—"},
+      ].map(({label,val})=><div key={label} style={{background:"var(--sur2)",borderRadius:12,padding:"14px 16px",textAlign:"center"}}>
+        <div style={{fontSize:20,fontWeight:800,color:"var(--acc)"}}>{val}</div>
+        <div style={{fontSize:11,color:"var(--mut)",marginTop:4}}>{label}</div>
+      </div>)}
+    </div>
+
+    {/* Category scores (latest approved) */}
+    {catAvgs.some(c=>c.avg!==null)&&<div style={{marginBottom:20}}>
+      <div style={{fontFamily:"var(--fh)",fontWeight:800,fontSize:12,color:"var(--mut)",textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Competency Avg (Approved Evals)</div>
+      {catAvgs.map(({cat,avg:ca})=><div key={cat.id} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+        <div style={{width:140,fontSize:12,color:"var(--tx)",flexShrink:0}}>{cat.name}</div>
+        <div style={{flex:1,height:8,background:"var(--bdr)",borderRadius:4,overflow:"hidden"}}>
+          <div style={{width:`${ca?((ca/5)*100):0}%`,height:"100%",background:ca>=4?"var(--grn)":ca>=3?"var(--org)":"var(--red)",borderRadius:4,transition:"width .4s"}}/>
+        </div>
+        <div style={{width:32,textAlign:"right",fontSize:13,fontWeight:700,color:"var(--tx)"}}>{ca||"—"}</div>
+      </div>)}
+    </div>}
+
+    {/* Eval history */}
+    <div style={{fontFamily:"var(--fh)",fontWeight:800,fontSize:12,color:"var(--mut)",textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Evaluation History</div>
+    {sorted.length===0
+      ? <div style={{textAlign:"center",padding:"24px 0",color:"var(--mut)",fontSize:13}}>No evaluations yet</div>
+      : <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:240,overflowY:"auto"}}>
+          {sorted.map(e=>{
+            const aName=getAssessorName(e)||"JL";
+            const {notes}=parseNotes(e.notes||"");
+            const sc=avgScore(e.scores);
+            return <div key={e.id} style={{display:"flex",alignItems:"center",gap:12,background:"var(--sur2)",borderRadius:10,padding:"10px 14px"}}>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700,fontSize:13}}>{fmtDate(e.eval_date)}</div>
+                <div style={{fontSize:11,color:"var(--mut)",marginTop:2}}>by {aName}{notes?` · ${notes.slice(0,50)}${notes.length>50?"…":""}`:""}</div>
+              </div>
+              <span className={`badge ${e.status}`}>{e.status}</span>
+              <div style={{fontWeight:800,fontSize:15,color:"var(--br)",minWidth:36,textAlign:"right"}}>{sc}/5</div>
+              <button className="btn btn-g xs" onClick={()=>setModal({type:"eval-detail",data:e})}>Details</button>
+            </div>;
+          })}
+        </div>}
+
+    {/* Actions */}
+    <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
+      <button className="btn btn-g" onClick={onClose}>Close</button>
+      <button className="btn btn-p" onClick={()=>setModal({type:"eval-wizard",data:{mitraId:m.id}})}>+ New Evaluation</button>
+    </div>
+  </div></div>;
+}
+
 function MitraForm({data,onSave,onClose}){
   const [form,setForm]=useState({name:data?.name||"",employeeId:data?.employee_id||data?.employeeId||"",joinDate:data?.join_date||data?.joinDate||"",id:data?.id||null});
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));

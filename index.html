@@ -73,6 +73,7 @@ const db = {
   addEval:        (d) => sb("evaluations", { method: "POST", body: JSON.stringify({ mitra_id: d.mitraId, status: d.status, eval_date: d.date, notes: d.notes || "" }) }),
   updateEval:     (id, d) => sb(`evaluations?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ status: d.status, eval_date: d.date, notes: d.notes || "" }) }),
   updateStatus:   (id, status) => sb(`evaluations?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
+  deleteEval:     (id) => sb(`evaluations?id=eq.${id}`, { method: "DELETE", prefer: "return=minimal" }),
   getScores:      () => sb("evaluation_scores?select=*"),
   addScores:      (evalId, scores) => sb("evaluation_scores", { method: "POST", body: JSON.stringify(Object.entries(scores).map(([subId, score]) => ({ evaluation_id: evalId, sub_competency_id: subId, score }))) }),
   deleteScores:   (evalId) => sb(`evaluation_scores?evaluation_id=eq.${evalId}`, { method: "DELETE", prefer: "return=minimal" }),
@@ -258,7 +259,7 @@ const CSS = `
 // ══════════════════════════════════════════════════════
 // LOGIN — Role Selection
 // ══════════════════════════════════════════════════════
-const JL_PASSWORD = "kitakerenbangetcoyy";
+const JL_PASSWORD = "qccentralkitchen";
 const VALIDATOR={id:"ast-01308",name:"Muhammad Nashir Effendy",role:"Jr Lead QC CK",employeeId:"AST-01308"};
 const ASSESSORS=[
   {id:"gina-00898",  name:"Gina Nisrina Yonia",   role:"QC Associate",employeeId:"AST-00898",password:"AST-00898"},
@@ -447,6 +448,11 @@ function App() {
     } catch(e){ tip(e.message,"err"); }
   };
 
+  const delEval = async id => {
+    try { await db.deleteScores(id); await db.deleteEval(id); tip("Draft deleted 🗑️"); await load(); }
+    catch(e){ tip(e.message,"err"); }
+  };
+
   const updStatus = async (id,status) => {
     try { await db.updateStatus(id,status); tip(status==="Approved"?"Approved ✅":"Status updated"); await load(); }
     catch(e){ tip(e.message,"err"); }
@@ -469,7 +475,7 @@ function App() {
   if (!user) return <><style>{CSS}</style><Login onLogin={u=>{ setUser(u); setPage(u.role==="mitra"?"sensory":"dashboard"); }}/></>;
   if (loading && user.role!=="mitra") return <><style>{CSS}</style><div className="lscreen"><div className="spin"/><div style={{color:"var(--mut)",fontWeight:600}}>Loading from database…</div></div></>;
 
-  const p = {user,mitras,mStats,evals:richEvals,myEvals,categories,allSubs,counts,setModal,setPage,delMitra,updStatus,delCat,expMitras,expEvals,saveMitra};
+  const p = {user,mitras,mStats,evals:richEvals,myEvals,categories,allSubs,counts,setModal,setPage,delMitra,updStatus,delEval,delCat,expMitras,expEvals,saveMitra};
 
   return (
     <>
@@ -583,7 +589,7 @@ function Mitras({mStats,user,setModal,delMitra,expMitras}){
   </div>;
 }
 
-function Evals({ evals, myEvals, mitras, user, setModal, updStatus, expEvals, categories, allSubs }) {
+function Evals({ evals, myEvals, mitras, user, setModal, updStatus, delEval, expEvals, categories, allSubs }) {
   const [tab, setTab] = useState('all');
   const display = evals;
   const list = [...display]
@@ -666,6 +672,9 @@ function Evals({ evals, myEvals, mitras, user, setModal, updStatus, expEvals, ca
                   )}
                   {e.status === 'Draft' && (user.role==="lead" || user.role==="assessor") && (
                     <button className="btn btn-g xs" onClick={() => setModal({ type: 'eval-wizard', data: e })}>Edit</button>
+                  )}
+                  {e.status === 'Draft' && (user.role==="lead" || user.role==="assessor") && (
+                    <button className="btn btn-d xs" onClick={() => { if(window.confirm(`Delete this draft for ${m?.name||'this mitra'}? This cannot be undone.`)) delEval(e.id); }}>🗑️ Delete</button>
                   )}
                 </div></td>
               </tr>

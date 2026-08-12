@@ -22,8 +22,10 @@
 <script src="https://unpkg.com/@babel/standalone@7.23.5/babel.min.js"></script>
 
 <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script type="text/babel" data-presets="react">
-const { useState, useMemo, useEffect, useCallback } = React;
+const { useState, useMemo, useEffect, useCallback, useRef } = React;
 const { RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Tooltip, LineChart, Line, XAxis, YAxis, CartesianGrid, Legend, BarChart, Bar, ComposedChart, Cell, LabelList } = Recharts;
 
 // ══════════════════════════════════════════════════════
@@ -68,6 +70,8 @@ const db = {
   updateCategory: (id, name) => sb(`categories?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
   deleteCategory: (id) => sb(`categories?id=eq.${id}`, { method: "DELETE", prefer: "return=minimal" }),
   addSub:         (catId, name, order) => sb("sub_competencies", { method: "POST", body: JSON.stringify({ category_id: catId, name, sort_order: order }) }),
+  updateSub:      (id, name, order) => sb(`sub_competencies?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ name, sort_order: order }) }),
+  deleteSub:      (id) => sb(`sub_competencies?id=eq.${id}`, { method: "DELETE", prefer: "return=minimal" }),
   deleteSubs:     (catId) => sb(`sub_competencies?category_id=eq.${catId}`, { method: "DELETE", prefer: "return=minimal" }),
   getEvaluations: () => sb("evaluations?select=*&order=eval_date.desc"),
   addEval:        (d) => sb("evaluations", { method: "POST", body: JSON.stringify({ mitra_id: d.mitraId, status: d.status, eval_date: d.date, notes: d.notes || "" }) }),
@@ -109,6 +113,47 @@ const dlXLSX = (sheetsArr, filename) => {
   });
   XLSX.writeFile(wb, filename);
 };
+
+// Snapshot a DOM node (charts included, since Recharts renders SVG) into a paginated A4 PDF,
+// so the export matches exactly what's on screen instead of being rebuilt from raw data.
+const exportNodeToPDF = async (node, filename, title) => {
+  if (!node) return;
+  if (!window.html2canvas || !window.jspdf) { alert("PDF export belum siap, coba lagi sebentar lalu ulangi."); return; }
+  const canvas = await window.html2canvas(node, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({ orientation: "p", unit: "pt", format: "a4" });
+  const pageW = pdf.internal.pageSize.getWidth();
+  const pageH = pdf.internal.pageSize.getHeight();
+  const margin = 30;
+  const imgW = pageW - margin*2;
+  const imgH = canvas.height * (imgW / canvas.width);
+  const imgData = canvas.toDataURL("image/png");
+
+  let headerH = 0;
+  if (title) {
+    pdf.setFont("helvetica","bold"); pdf.setFontSize(14); pdf.setTextColor(30,40,60);
+    pdf.text(title, margin, margin+12);
+    pdf.setFont("helvetica","normal"); pdf.setFontSize(9); pdf.setTextColor(120,130,150);
+    pdf.text(`Digenerate ${new Date().toLocaleString("id-ID")}`, margin, margin+26);
+    pdf.setTextColor(0,0,0);
+    headerH = 38;
+  }
+
+  // Multi-page split: draw the same full-height image on each page, shifted up by however
+  // much has already been shown — content outside the page bounds is simply clipped.
+  let renderedH = 0, page = 0;
+  while (renderedH < imgH) {
+    const availH = pageH - margin*2 - (page===0 ? headerH : 0);
+    if (page>0) pdf.addPage();
+    const y = (page===0 ? margin+headerH : margin) - renderedH;
+    pdf.addImage(imgData, "PNG", margin, y, imgW, imgH, undefined, "FAST");
+    renderedH += availH;
+    page++;
+    if (page>60) break; // safety cap
+  }
+  pdf.save(filename);
+};
+
 
 // ══════════════════════════════════════════════════════
 // CSS
@@ -380,9 +425,10 @@ function App() {
   const [allSubs, setAllSubs] = useState([]);
   const [evals, setEvals] = useState([]);
   const [scores, setScores] = useState([]);
+  const [sensoryResults, setSensoryResults] = useState(loadSR());
   const [loading, setLoading] = useState(true);
 
-  const tip = (msg, type="ok") => { setToast({msg,type}); setTimeout(()=>setToast(null),3000); };
+  const tip = (msg, type="ok") => { setToast({msg,type}); setTimeout(()=>setToast(null), type==="ok"?3000:5000); };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -396,6 +442,7 @@ function App() {
   },[]);
 
   useEffect(()=>{ if(user && user.role!=="mitra") load(); else if(user?.role==="mitra") setLoading(false); },[user]);
+  useEffect(()=>{ fetchSR().then(setSensoryResults); },[user]);
 
   const scMap = useMemo(()=>{
     const m={};
@@ -409,6 +456,9 @@ function App() {
   // Assessor and Jr Lead QC see the exact same evaluation list (validation/approval remains lead-only)
   const myEvals=richEvals;
   const lastOk = useCallback((mid)=>richEvals.filter(e=>e.mitra_id===mid&&e.status==="Approved").sort((a,b)=>new Date(b.eval_date)-new Date(a.eval_date))[0]||null,[richEvals]);
+  // Sensory Screening is a category scored automatically from the mitra's sensory quiz
+  // results (SENSORY_TOPICS), not manually via the evaluation wizard.
+  const sensCat = useMemo(()=>categories.find(c=>/sensory/i.test(c.name))||null,[categories]);
 
   const mStats = useMemo(()=>mitras.map(m=>{
     const last=lastOk(m.id);
@@ -461,10 +511,39 @@ function App() {
   const saveCat = async cat => {
     try {
       let cid=cat.id;
-      if(cid){ await db.updateCategory(cid,cat.name); await db.deleteSubs(cid); }
-      else { const r=await db.addCategory(cat.name); cid=r[0].id; }
-      for(let i=0;i<cat.subs.length;i++) await db.addSub(cid,cat.subs[i].name,i);
-      tip("Category saved ✅"); await load(); setModal(null);
+      const blocked=[]; // subs that couldn't be deleted because they already have recorded scores
+      if(cid){
+        await db.updateCategory(cid,cat.name);
+        // Non-destructive sync: update existing sub-competencies in place (keeps their id,
+        // so evaluation_scores already recorded against them stay intact), only insert
+        // genuinely new ones, and only delete ones the user explicitly removed.
+        const before = categories.find(c=>c.id===cid)?.subs || [];
+        const keptIds = new Set(cat.subs.filter(s=>s.existing).map(s=>s.id));
+        const removed = before.filter(s=>!keptIds.has(s.id));
+        for (const s of removed) {
+          try { await db.deleteSub(s.id); }
+          catch(err) {
+            // FK violation = this sub-competency already has evaluation_scores recorded
+            // against it. Keep it rather than losing that history; just tell the user.
+            if (/foreign key|violates/i.test(err.message)) blocked.push(s.name);
+            else throw err;
+          }
+        }
+        for (let i=0;i<cat.subs.length;i++) {
+          const s = cat.subs[i];
+          if (s.existing) await db.updateSub(s.id, s.name, i);
+          else await db.addSub(cid, s.name, i);
+        }
+      } else {
+        const r=await db.addCategory(cat.name); cid=r[0].id;
+        for(let i=0;i<cat.subs.length;i++) await db.addSub(cid,cat.subs[i].name,i);
+      }
+      if (blocked.length) {
+        tip(`Category saved. "${blocked.join('", "')}" tidak dihapus karena sudah punya riwayat penilaian tersimpan.`, "warn");
+      } else {
+        tip("Category saved ✅");
+      }
+      await load(); setModal(null);
     } catch(e){ tip(e.message,"err"); }
   };
   const delCat = async id => { try{ await db.deleteCategory(id); tip("Deleted"); await load(); }catch(e){tip(e.message,"err");} };
@@ -475,12 +554,12 @@ function App() {
   if (!user) return <><style>{CSS}</style><Login onLogin={u=>{ setUser(u); setPage(u.role==="mitra"?"sensory":"dashboard"); }}/></>;
   if (loading && user.role!=="mitra") return <><style>{CSS}</style><div className="lscreen"><div className="spin"/><div style={{color:"var(--mut)",fontWeight:600}}>Loading from database…</div></div></>;
 
-  const p = {user,mitras,mStats,evals:richEvals,myEvals,categories,allSubs,counts,setModal,setPage,delMitra,updStatus,delEval,delCat,expMitras,expEvals,saveMitra};
+  const p = {user,mitras,mStats,evals:richEvals,myEvals,categories,allSubs,counts,setModal,setPage,delMitra,updStatus,delEval,delCat,expMitras,expEvals,saveMitra,sensCat,sensoryResults};
 
   return (
     <>
       <style>{CSS}</style>
-      {toast&&<div style={{position:"fixed",top:20,right:20,zIndex:9999,padding:"12px 20px",borderRadius:12,fontWeight:700,fontSize:14,boxShadow:"0 4px 20px rgba(0,0,0,.15)",background:toast.type==="err"?"#ffebee":"#e8f5e9",color:toast.type==="err"?"#c62828":"#2e7d32",border:"1.5px solid",borderColor:toast.type==="err"?"#ef9a9a":"#a5d6a7"}}>{toast.msg}</div>}
+      {toast&&<div style={{position:"fixed",top:20,right:20,zIndex:9999,padding:"12px 20px",borderRadius:12,fontWeight:700,fontSize:14,boxShadow:"0 4px 20px rgba(0,0,0,.15)",maxWidth:420,background:toast.type==="err"?"#ffebee":toast.type==="warn"?"#fff8e1":"#e8f5e9",color:toast.type==="err"?"#c62828":toast.type==="warn"?"#8a6d1a":"#2e7d32",border:"1.5px solid",borderColor:toast.type==="err"?"#ef9a9a":toast.type==="warn"?"#ffe082":"#a5d6a7"}}>{toast.msg}</div>}
       <div className="app">
         <aside className="sidebar"><Nav page={page} setPage={setPage} user={user} onLogout={()=>{setUser(null);setPage("dashboard");}}/></aside>
         <div className={`mob-ov ${mob?"open":""}`} onClick={()=>setMob(false)}/>
@@ -501,8 +580,8 @@ function App() {
         </main>
       </div>
       {modal?.type==="mitra-form"   && <MitraForm   data={modal.data} onSave={saveMitra} onClose={()=>setModal(null)}/>}
-      {modal?.type==="eval-wizard"  && <EvalWizard  data={modal.data} mitras={mitras} categories={categories} allSubs={allSubs} user={user} onSave={saveEval} onClose={()=>setModal(null)}/>}
-      {modal?.type==="mitra-detail" && <MitraDetail mitra={modal.data} evals={richEvals.filter(e=>e.mitra_id===modal.data.id)} categories={categories} allSubs={allSubs} onClose={()=>setModal(null)} setModal={setModal}/>}
+      {modal?.type==="eval-wizard"  && <EvalWizard  data={modal.data} mitras={mitras} categories={categories} allSubs={allSubs} user={user} sensCat={sensCat} onSave={saveEval} onClose={()=>setModal(null)}/>}
+      {modal?.type==="mitra-detail" && <MitraDetail mitra={modal.data} evals={richEvals.filter(e=>e.mitra_id===modal.data.id)} categories={categories} allSubs={allSubs} sensCat={sensCat} sensoryResults={sensoryResults} onClose={()=>setModal(null)} setModal={setModal}/>}
       {modal?.type==="cat-form"     && <CatForm     data={modal.data} onSave={saveCat} onClose={()=>setModal(null)}/>}
       {modal?.type==="eval-detail"  && <EvalDetail  ev={modal.data} mitras={mitras} categories={categories} onClose={()=>setModal(null)}/>}
     </>
@@ -670,8 +749,8 @@ function Evals({ evals, myEvals, mitras, user, setModal, updStatus, delEval, exp
                   {user.role==="lead" && e.status==="Submitted" && (
                     <button className="btn btn-ok xs" onClick={() => updStatus(e.id, 'Approved')}>✅ Validate</button>
                   )}
-                  {e.status === 'Draft' && (user.role==="lead" || user.role==="assessor") && (
-                    <button className="btn btn-g xs" onClick={() => setModal({ type: 'eval-wizard', data: e })}>Edit</button>
+                  {(user.role==="lead" || (user.role==="assessor" && e.status!=="Approved")) && (
+                    <button className="btn btn-g xs" onClick={() => setModal({ type: 'eval-wizard', data: e })}>✏️ Edit</button>
                   )}
                   {e.status === 'Draft' && (user.role==="lead" || user.role==="assessor") && (
                     <button className="btn btn-d xs" onClick={() => { if(window.confirm(`Delete this draft for ${m?.name||'this mitra'}? This cannot be undone.`)) delEval(e.id); }}>🗑️ Delete</button>
@@ -696,6 +775,7 @@ function Comps({categories,user,setModal,delCat}){
         <div className="row" style={{marginBottom:14}}>
           <div style={{fontFamily:"var(--fh)",fontWeight:800,fontSize:16}}>{cat.name}</div>
           <div style={{background:"var(--sur2)",borderRadius:99,padding:"2px 10px",fontSize:11,fontWeight:700,color:"var(--mut)"}}>{cat.subs.length} competencies</div>
+          {/sensory/i.test(cat.name) && <div style={{background:"#fff3cd",color:"#8a6d1a",borderRadius:99,padding:"2px 10px",fontSize:11,fontWeight:700}}>🧪 Auto dari Sensory Quiz</div>}
           <div className="sp"/>
           {(user.role==="lead"||user.role==="assessor")&&<div className="gr"><button className="btn btn-g xs" onClick={()=>setModal({type:"cat-form",data:cat})}>✏️ Edit</button><button className="btn btn-d xs" onClick={()=>delCat(cat.id)}>Delete</button></div>}
         </div>
@@ -709,32 +789,28 @@ function Comps({categories,user,setModal,delCat}){
   </div>;
 }
 
-function Analytics({mitras,evals,categories,allSubs}){
+function Analytics({mitras,evals,categories,allSubs,sensCat,sensoryResults}){
   const [sel,setSel]=useState(mitras[0]?.id||"");
-  const [sensoryResults,setSensoryResults]=useState(loadSR());
-  useEffect(()=>{ fetchSR().then(setSensoryResults); },[]);
   const me=evals.filter(e=>e.mitra_id===sel&&e.status==="Approved").sort((a,b)=>new Date(a.eval_date)-new Date(b.eval_date));
   const latest=me[me.length-1], prev=me[me.length-2];
   const mitra=mitras.find(m=>m.id===sel);
-  const mitraSens=[...sensoryResults].filter(r=>r.mitraId===sel||r.name===mitra?.name).sort((a,b)=>a.timestamp-b.timestamp);
+  const mitraSens=[...(sensoryResults||[])].filter(r=>r.mitraId===sel||r.name===mitra?.name).sort((a,b)=>a.timestamp-b.timestamp);
   const sLast=mitraSens[mitraSens.length-1], sPrev=mitraSens[mitraSens.length-2];
-  const sensCat=categories.find(c=>/sensory/i.test(c.name));
-  const subSensScore=(subName,res)=>{
+  const subSensScore=(sub,res)=>{
     if(!res) return null;
-    const n=(subName||"").toLowerCase();
-    const topic=SENSORY_TOPICS.find(t=>n.includes(t.id)||n.includes(t.label.toLowerCase().split(" ")[0]));
-    const v=topic?res.topicScores?.[topic.id]:res.totalScore;
-    return v!=null?Number((v*5).toFixed(1)):null;
+    const topicId=matchSensoryTopic(sub.name);
+    const v=topicId==="total"?res.totalScore:res.topicScores?.[topicId];
+    return sensoryToFive(v);
   };
   const rd=categories.map(cat=>{
     if(sensCat&&cat.id===sensCat.id){
-      return {subject:cat.name.replace(" Process",""),current:sLast?Number((sLast.totalScore*5).toFixed(1)):0,previous:sPrev?Number((sPrev.totalScore*5).toFixed(1)):0,fullMark:5};
+      return {subject:cat.name.replace(" Process",""),current:sLast?sensoryToFive(sLast.totalScore):0,previous:sPrev?sensoryToFive(sPrev.totalScore):0,fullMark:5};
     }
     return {subject:cat.name.replace(" Process",""),current:latest?Number((cat.subs.reduce((s,sub)=>s+(latest.scores[sub.id]||0),0)/cat.subs.length).toFixed(1)):0,previous:prev?Number((cat.subs.reduce((s,sub)=>s+(prev.scores[sub.id]||0),0)/cat.subs.length).toFixed(1)):0,fullMark:5};
   });
   const ss=allSubs.map(sub=>{
     if(sensCat&&sub.category_id===sensCat.id){
-      return {name:sub.name,current:subSensScore(sub.name,sLast)??0,previous:subSensScore(sub.name,sPrev)??0};
+      return {name:sub.name,current:subSensScore(sub,sLast)??0,previous:subSensScore(sub,sPrev)??0};
     }
     return {name:sub.name,current:latest?(latest.scores[sub.id]||0):0,previous:prev?(prev.scores[sub.id]||0):0};
   }).sort((a,b)=>a.current-b.current);
@@ -787,29 +863,42 @@ function Analytics({mitras,evals,categories,allSubs}){
   </div>;
 }
 
-function Heatmap({mitras,evals,allSubs,categories}){
+function Heatmap({mitras,evals,categories,sensCat,sensoryResults}){
   const hc=s=>!s?"#e0e0e0":s>=4.5?"#00c853":s>=3.5?"#64dd17":s>=2.5?"#ffc107":s>=1.5?"#ff9800":"#f44336";
   const lo=mid=>evals.filter(e=>e.mitra_id===mid&&e.status==="Approved").sort((a,b)=>new Date(b.eval_date)-new Date(a.eval_date))[0]||null;
-  const data=mitras.map(m=>({mitra:m,scores:allSubs.reduce((acc,sub)=>{const l=lo(m.id);acc[sub.id]=l?(l.scores[sub.id]||0):null;return acc},{})}));
+  // Build the column list from categories (in category order) rather than the raw allSubs
+  // list, so the category-group header row always lines up with the sub-competency columns
+  // beneath it — a flat, independently-sorted allSubs can drift out of sync with cat.subs.
+  const catsWithSubs=categories.filter(cat=>cat.subs.length>0);
+  const flatSubs=catsWithSubs.flatMap(cat=>cat.subs);
+  const scoreFor=(m,sub)=>{
+    if(sensCat && sub.category_id===sensCat.id){
+      return sensorySubScore(sub,m.id,m.name,sensoryResults);
+    }
+    const l=lo(m.id);
+    return l?(l.scores[sub.id]||0):null;
+  };
+  const data=mitras.map(m=>({mitra:m,scores:flatSubs.reduce((acc,sub)=>{acc[sub.id]=scoreFor(m,sub);return acc;},{})}));
   return <div className="page">
     <div className="ph"><div className="pt">🗺️ Team Skill Heatmap</div><div className="ps">Competency gaps across all Mitra</div></div>
     <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
       <span style={{fontSize:12,fontWeight:700,color:"var(--mut)"}}>Score:</span>
       {[["#f44336","1"],["#ff9800","2"],["#ffc107","3"],["#64dd17","4"],["#00c853","5"],["#e0e0e0","No data"]].map(([c,l])=><div key={l} style={{display:"flex",alignItems:"center",gap:5,fontSize:12,fontWeight:600}}><div style={{width:16,height:16,borderRadius:4,background:c}}/>{l}</div>)}
+      {sensCat && <div style={{fontSize:11,color:"var(--mut)"}}>🧪 {sensCat.name} diambil otomatis dari Sensory Quiz</div>}
     </div>
     <div className="card" style={{overflowX:"auto"}}>
       <table style={{width:"100%",borderCollapse:"separate",borderSpacing:4}}>
         <thead>
           <tr><th style={{textAlign:"left",padding:"6px 10px",fontSize:11,color:"var(--mut)",fontWeight:700,minWidth:130}}>Mitra</th>
-            {categories.map(cat=><th key={cat.id} colSpan={cat.subs.length} style={{textAlign:"center",padding:"4px 6px",fontSize:10,color:"var(--acc)",fontWeight:800,textTransform:"uppercase",background:"#e3f2fd",borderRadius:6}}>{cat.name.replace(" Process","")}</th>)}
+            {catsWithSubs.map(cat=><th key={cat.id} colSpan={cat.subs.length} style={{textAlign:"center",padding:"4px 6px",fontSize:10,color:"var(--acc)",fontWeight:800,textTransform:"uppercase",background:"#e3f2fd",borderRadius:6}}>{cat.name.replace(" Process","")}</th>)}
           </tr>
-          <tr><th/>{allSubs.map(sub=><th key={sub.id} style={{fontSize:9,fontWeight:700,color:"var(--mut)",padding:"4px 6px",textAlign:"center",maxWidth:80}}>{sub.name.length>12?sub.name.slice(0,11)+"…":sub.name}</th>)}</tr>
+          <tr><th/>{flatSubs.map(sub=><th key={sub.id} style={{fontSize:9,fontWeight:700,color:"var(--mut)",padding:"4px 6px",textAlign:"center",maxWidth:80}}>{sub.name.length>12?sub.name.slice(0,11)+"…":sub.name}</th>)}</tr>
         </thead>
         <tbody>{data.map(row=><tr key={row.mitra.id}>
           <td style={{fontWeight:700,fontSize:13,padding:"6px 10px",whiteSpace:"nowrap"}}>
             <div className="row"><div className="av" style={{width:28,height:28,fontSize:12}}>{row.mitra.name[0]}</div>{row.mitra.name}</div>
           </td>
-          {allSubs.map(sub=>{const s=row.scores[sub.id]; return <td key={sub.id} style={{padding:3,textAlign:"center"}}><div className="hc" style={{background:hc(s),width:44,height:34,margin:"0 auto",color:"#fff",fontSize:13,fontWeight:800,borderRadius:7}}>{s||"—"}</div></td>;})}
+          {flatSubs.map(sub=>{const s=row.scores[sub.id]; return <td key={sub.id} style={{padding:3,textAlign:"center"}}><div className="hc" style={{background:hc(s),width:44,height:34,margin:"0 auto",color:"#fff",fontSize:13,fontWeight:800,borderRadius:7}}>{s||"—"}</div></td>;})}
         </tr>)}</tbody>
       </table>
     </div>
@@ -819,9 +908,11 @@ function Heatmap({mitras,evals,allSubs,categories}){
 // ══════════════════════════════════════════════════════
 // EVAL WIZARD
 // ══════════════════════════════════════════════════════
-function EvalWizard({ data, mitras, categories, allSubs, user, onSave, onClose }) {
+function EvalWizard({ data, mitras, categories, allSubs, user, sensCat, onSave, onClose }) {
+  // Sensory Screening is scored automatically from the Sensory Quiz, not manually here.
+  const manualCategories = categories.filter(c => !sensCat || c.id !== sensCat.id);
   const emptyScores = {};
-  allSubs.forEach(s => emptyScores[s.id] = 3);
+  manualCategories.forEach(c => c.subs.forEach(s => emptyScores[s.id] = 3));
   const [step, setStep] = useState(1);
   const [busy, setBusy] = useState(false);
   const [hasDraft, setHasDraft] = useState(false);
@@ -917,7 +1008,8 @@ function EvalWizard({ data, mitras, categories, allSubs, user, onSave, onClose }
       {step === 2 && (
         <div>
           <div className="al ai" style={{marginBottom:12}}><span>💡</span>Score 1–5. Draft tersimpan otomatis setiap perubahan.</div>
-          {categories.map(cat => (
+          {sensCat && <div className="al ai" style={{marginBottom:12}}><span>🧪</span>{sensCat.name} tidak dinilai di sini — skornya diambil otomatis dari hasil Sensory Quiz mitra.</div>}
+          {manualCategories.map(cat => (
             <div key={cat.id} style={{marginBottom:20}}>
               <div style={{fontFamily:"var(--fh)",fontWeight:800,fontSize:14,color:"var(--acc)",marginBottom:10,padding:"8px 12px",background:"var(--sur2)",borderRadius:8,display:"flex",alignItems:"center",gap:8}}>
                 📁 {cat.name}
@@ -952,7 +1044,7 @@ function EvalWizard({ data, mitras, categories, allSubs, user, onSave, onClose }
                 <div style={{fontSize:28,fontWeight:800,color:"var(--br)"}}>{overall}<span style={{fontSize:14,color:"var(--mut)"}}>/5</span></div>
               </div>
             </div>
-            {categories.map(cat => (
+            {manualCategories.map(cat => (
               <div key={cat.id} style={{marginBottom:10}}>
                 <div style={{fontSize:12,fontWeight:800,color:"var(--acc)",marginBottom:6}}>{cat.name}</div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:6}}>
@@ -972,10 +1064,18 @@ function EvalWizard({ data, mitras, categories, allSubs, user, onSave, onClose }
           {user.role === "assessor" && (
             <div className="al aw" style={{marginBottom:8}}><span>ℹ️</span>Setelah Submit, menunggu validasi dari <strong>{VALIDATOR.name}</strong>.</div>
           )}
+          {data?.id && data.status && data.status !== 'Draft' && (
+            <div className="al aw" style={{marginBottom:8}}><span>✏️</span>Penilaian ini sudah <strong>{data.status}</strong>. Kamu bisa menyimpan perubahan tanpa mengubah status, atau kirim ulang untuk validasi.</div>
+          )}
           <div className="row m16">
             <button className="btn btn-g" onClick={() => setStep(2)}>← Back</button>
             <div className="sp" />
             <button className="btn btn-g" onClick={() => doSave('Draft')} disabled={busy}>💾 Save Draft</button>
+            {data?.id && data.status && data.status !== 'Draft' && (
+              <button className="btn btn-ok" onClick={() => doSave(data.status)} disabled={busy}>
+                {busy ? <span className="spin" /> : `✅ Save Changes (tetap ${data.status})`}
+              </button>
+            )}
             <button className="btn btn-p" onClick={() => doSave('Submitted')} disabled={busy}>
               {busy ? <span className="spin" /> : '📤 Submit for Validation'}
             </button>
@@ -1009,14 +1109,22 @@ function EvalDetail({ev:e,mitras,categories,onClose}){
   </div></div>;
 }
 
-function MitraDetail({mitra:m, evals, categories, allSubs, onClose, setModal}){
+function MitraDetail({mitra:m, evals, categories, allSubs, sensCat, sensoryResults, onClose, setModal}){
   const sorted = [...evals].sort((a,b)=>new Date(b.eval_date)-new Date(a.eval_date));
   const latest = sorted[0];
   const avg = latest ? avgScore(latest.scores) : null;
   const statusColor = m.evalStatus==='overdue'?'var(--red)':m.evalStatus==='due-soon'?'var(--org)':'var(--grn)';
 
-  // Per-category averages across all approved evals
+  // Per-category averages. Sensory Screening is scored from the quiz (topic weights already
+  // proportional — rasa 30% / ranking 40% / triangle 30% — so we average the mitra's quiz
+  // attempts' weighted totalScore rather than a plain mean of the 3 sub-competency cells.
+  const mySens = (sensoryResults||[]).filter(r=>r.mitraId===m.id || r.name===m.name);
   const catAvgs = categories.map(cat=>{
+    if(sensCat && cat.id===sensCat.id){
+      if(!mySens.length) return {cat, avg:null};
+      const a = mySens.reduce((sum,r)=>sum+sensoryToFive(r.totalScore),0)/mySens.length;
+      return {cat, avg:a.toFixed(1)};
+    }
     const approved = sorted.filter(e=>e.status==='Approved');
     if(!approved.length) return {cat, avg:null};
     const catAvg = approved.reduce((sum,e)=>{
@@ -1115,16 +1223,23 @@ function MitraForm({data,onSave,onClose}){
 }
 
 function CatForm({data,onSave,onClose}){
-  const [name,setName]=useState(data?.name||""); const [subs,setSubs]=useState(data?.subs||[]); const [ns,setNs]=useState("");
-  const uid=()=>Math.random().toString(36).slice(2,10);
-  const add=()=>{ if(ns.trim()){setSubs(p=>[...p,{id:uid(),name:ns.trim()}]);setNs("");} };
+  const [name,setName]=useState(data?.name||"");
+  // Mark subs loaded from the DB as existing:true so saveCat knows to UPDATE
+  // them in place (keeping their id) instead of deleting + recreating them —
+  // recreating would orphan any evaluation_scores already recorded against them.
+  const [subs,setSubs]=useState((data?.subs||[]).map(s=>({...s,existing:true})));
+  const [ns,setNs]=useState("");
+  const uid=()=>"new_"+Math.random().toString(36).slice(2,10);
+  const add=()=>{ if(ns.trim()){setSubs(p=>[...p,{id:uid(),name:ns.trim(),existing:false}]);setNs("");} };
+  const rename=(i,v)=>setSubs(p=>p.map((s,idx)=>idx===i?{...s,name:v}:s));
   return <div className="mb"><div className="mo">
     <button className="mc" onClick={onClose}>✕</button>
     <div className="mt2">{data?"Edit Category":"New Category"}</div>
+    {data && <div className="al ai" style={{marginBottom:12}}><span>💡</span>Mengubah nama sub-kompetensi di sini aman — penilaian yang sudah tersimpan untuk sub-kompetensi tersebut tetap tersambung. Hanya sub-kompetensi yang kamu hapus (✕) yang datanya akan hilang.</div>}
     <div className="fg"><label className="fl">Category Name</label><input className="fi" value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Inbound Process"/></div>
     <div className="fg"><label className="fl">Sub-Competencies</label>
       <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>
-        {subs.map((s,i)=><div key={s.id||i} className="row"><span style={{flex:1,fontSize:13,fontWeight:600,padding:"8px 12px",background:"var(--bg)",borderRadius:8,border:"1.5px solid var(--bdr)"}}>{s.name}</span><button className="btn btn-d xs" onClick={()=>setSubs(p=>p.filter((_,idx)=>idx!==i))}>✕</button></div>)}
+        {subs.map((s,i)=><div key={s.id||i} className="row"><input className="fi" style={{flex:1,fontSize:13,fontWeight:600}} value={s.name} onChange={e=>rename(i,e.target.value)} placeholder="Sub-competency name"/><button className="btn btn-d xs" onClick={()=>setSubs(p=>p.filter((_,idx)=>idx!==i))}>✕</button></div>)}
       </div>
       <div className="row"><input className="fi" value={ns} onChange={e=>setNs(e.target.value)} placeholder="Add sub-competency…" onKeyDown={e=>e.key==="Enter"&&add()}/><button className="btn btn-g" onClick={add}>Add</button></div>
     </div>
@@ -1141,6 +1256,42 @@ const SENSORY_TOPICS = [
   { id:"rank",  label:"Ranking Test",  emoji:"🏆", weight:0.40, color:"#fbd29a", group:"rank" },
   { id:"tri",   label:"Triangle Test", emoji:"🔺", weight:0.30, color:"#9ed4c8", group:"tri"  },
 ];
+
+// Explicit (non-fuzzy) mapping from a Sensory Screening sub-competency name to its quiz topic.
+// Kept as fixed keyword lists (rather than substring-of-label guessing) so renaming a
+// sub-competency slightly doesn't silently break which quiz topic feeds its score.
+// A sub-competency that doesn't match a specific topic (e.g. a single merged "Sensory
+// Evaluation" sub replacing the old 3-way split) falls back to "total" — the quiz's
+// overall weighted score — rather than showing no data.
+const SENSORY_SUB_KEYWORDS = [
+  { topicId:"tri",  keywords:["triangle"] },
+  { topicId:"rank", keywords:["ranking","intensity"] },
+  { topicId:"rasa", keywords:["rasa","taste","basic"] },
+];
+function matchSensoryTopic(subName) {
+  const n = (subName||"").toLowerCase();
+  const hit = SENSORY_SUB_KEYWORDS.find(m=>m.keywords.some(k=>n.includes(k)));
+  return hit ? hit.topicId : "total";
+}
+// Convert a 0-1 fraction (as used for sensory quiz topic/total scores) to the app's 1-5 scale.
+// 100% -> 5, 80% -> 4, 60% -> 3 … i.e. divide the percentage by 20.
+const sensoryToFive = (frac) => frac==null ? null : Number((frac*5).toFixed(1));
+// Latest sensory quiz result for a given mitra (matches by id, falling back to name since
+// some historical rows only carry mitra_name).
+function latestSensoryResult(mitraId, mitraName, sensoryResults) {
+  const mine = (sensoryResults||[]).filter(r=>r.mitraId===mitraId || (mitraName && r.name===mitraName)).sort((a,b)=>b.timestamp-a.timestamp);
+  return mine[0] || null;
+}
+// Score (1-5) for one Sensory Screening sub-competency, sourced from the quiz — returns null
+// only if the mitra hasn't taken the quiz yet (matchSensoryTopic always resolves to a topic
+// or the "total" fallback, so every sub in the Sensory category gets a value once data exists).
+function sensorySubScore(sub, mitraId, mitraName, sensoryResults) {
+  const topicId = matchSensoryTopic(sub.name);
+  const res = latestSensoryResult(mitraId, mitraName, sensoryResults);
+  if (!res) return null;
+  const frac = topicId==="total" ? res.totalScore : res.topicScores?.[topicId];
+  return frac!=null ? sensoryToFive(frac) : null;
+}
 
 // localStorage cache keys
 const SQ_KEY = "sensory_questions_v1";
@@ -1488,6 +1639,8 @@ function SensorySummary({ results }) {
 // ── LEAD: Results ───────────────────────────────────────
 function SensoryResults({ results, setResults }) {
   const fmt = ts => new Date(ts).toLocaleDateString("id-ID",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  const captureRef = useRef(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
   const exportXLSX = () => {
     // Sheet 1: Summary per mitra (latest result only)
     const latestMap = {};
@@ -1527,17 +1680,30 @@ function SensoryResults({ results, setResults }) {
     try { for(const r of results){ if(r.id) await db.deleteSensory(r.id); } } catch(e){ alert("Gagal hapus di server: "+e.message); return; }
     setResults([]);
   };
+  const exportPDF = async () => {
+    setPdfBusy(true);
+    try {
+      const dateStr = new Date().toLocaleDateString("id-ID").replace(/\//g,"-");
+      await exportNodeToPDF(captureRef.current, `Sensory_Results_${dateStr}.pdf`, "👅 Hasil Quiz Mitra — Sensory Evaluation");
+    } catch(e) {
+      alert("Gagal membuat PDF: "+e.message);
+    } finally {
+      setPdfBusy(false);
+    }
+  };
   return (
     <div>
       <div className="row" style={{marginBottom:16}}>
         <div style={{fontFamily:"var(--fh)",fontSize:16,fontWeight:800}}>Hasil Quiz Mitra</div>
         <div className="sp"/>
         {results.length>0&&<button className="btn btn-g sm" onClick={exportXLSX}>⬇ Export Excel</button>}
+        {results.length>0&&<button className="btn btn-g sm" onClick={exportPDF} disabled={pdfBusy}>{pdfBusy?<span className="spin"/>:"📄 Export PDF"}</button>}
         {results.length>0&&<button className="btn btn-d sm" onClick={clear}>🗑️ Hapus Semua</button>}
       </div>
       {results.length===0 && <div className="es card"><div className="ei">📊</div>Belum ada hasil quiz.</div>}
-      {results.length>0 && <SensorySummary results={results}/>}
-      {results.length>0&&<div className="card"><div className="tw"><table>
+      {results.length>0 && <div ref={captureRef}>
+        <SensorySummary results={results}/>
+        <div className="card"><div className="tw"><table>
         <thead><tr><th>Nama</th><th>Tanggal</th>{SENSORY_TOPICS.map(t=><th key={t.id}>{t.emoji} {t.label}</th>)}<th>Total</th></tr></thead>
         <tbody>{[...results].reverse().map((r,i)=>{
           const totalFrac = r.totalScore!=null ? r.totalScore : SENSORY_TOPICS.reduce((sum,t)=>{
@@ -1556,7 +1722,8 @@ function SensoryResults({ results, setResults }) {
             <td><span style={{fontWeight:800,fontSize:15,color:totalPct>=70?"var(--grn)":totalPct>=50?"var(--org)":"var(--red)"}}>{totalPct}%</span></td>
           </tr>;
         })}</tbody>
-      </table></div></div>}
+      </table></div></div>
+      </div>}
     </div>
   );
 }
